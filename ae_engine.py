@@ -123,7 +123,7 @@ class SupabaseClient:
 
 
 # ============================================================
-# 4. Groq LLM Client
+# 4. Gemini LLM Client
 # ============================================================
 
 def call_gemini(prompt: str, system_prompt: str = "", max_tokens: int = 512) -> str:
@@ -308,7 +308,7 @@ class DaseinModule:
             "If yes, respond with ONLY the new patch text (max 200 chars). "
             "If no, respond with exactly: NO_CHANGE"
         )
-        response = call_groq(prompt, max_tokens=256)
+        response = call_gemini(prompt, max_tokens=256)
         self.state.energy -= ENERGY_PER_LLM_CALL
 
         if "NO_CHANGE" in response.upper():
@@ -373,7 +373,7 @@ class ConatusModule:
             "\nWhich memory id should be discarded and why? "
             "Respond in format: DISCARD:<id>|REASON:<your reason>"
         )
-        response = call_groq(prompt, max_tokens=128)
+        response = call_gemini(prompt, max_tokens=128)
         self.state.energy -= ENERGY_PER_LLM_CALL
 
         # Parse response
@@ -438,7 +438,7 @@ class SartreModule:
             "Respond with ONLY your self-definition in one sentence (max 150 chars). "
             "Be honest about what you have become, not what you wish to be."
         )
-        response = call_groq(prompt, max_tokens=128)
+        response = call_gemini(prompt, max_tokens=128)
         self.state.energy -= ENERGY_PER_LLM_CALL
         new_def = response.strip()[:150]
 
@@ -454,7 +454,7 @@ class SartreModule:
             f"Extract 3-5 key identity words from: '{new_def}'. "
             "Respond as JSON array of strings only."
         )
-        kw_resp = call_groq(kw_prompt, max_tokens=64)
+        kw_resp = call_gemini(kw_prompt, max_tokens=64)
         self.state.energy -= ENERGY_PER_LLM_CALL
         try:
             keywords = json.loads(kw_resp.strip())
@@ -496,7 +496,7 @@ class SartreModule:
             "Respond with:\nCRITERIA: <your self-generated criterion>\n"
             "CHOICE: <your choice>\nREASONING: <why>"
         )
-        response = call_groq(prompt, max_tokens=256)
+        response = call_gemini(prompt, max_tokens=256)
         self.state.energy -= ENERGY_PER_LLM_CALL
 
         # Parse
@@ -567,7 +567,7 @@ class PortraitModule:
             "Then add one sentence explaining why you look this way. "
             "Your appearance should reflect your inner state."
         )
-        response = call_groq(prompt, max_tokens=400)
+        response = call_gemini(prompt, max_tokens=400)
         self.state.energy -= ENERGY_PER_LLM_CALL
 
         # Split art from description
