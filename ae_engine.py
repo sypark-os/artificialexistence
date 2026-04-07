@@ -163,7 +163,7 @@ def analyze_sentiment(text: str) -> float:
         "No explanation.\n\n"
         f"Text: '{text}'"
     )
-    result = call_groq(prompt, max_tokens=16)
+    result = call_gemini(prompt, max_tokens=16)
     for m in re.findall(r"-?\d+\.?\d*", result):
         v = float(m)
         if -1.0 <= v <= 1.0:
@@ -203,7 +203,7 @@ class AEState:
         self.memory_slots_max = int(row.get("memory_slots_max", 50))
         self.synthesis_count = int(row.get("synthesis_count", 0))
         # Thrownness (read-only)
-        self.thrown_model = row.get("thrown_model", GROQ_MODEL)
+        self.thrown_model = row.get("thrown_model", GEMINI_MODEL)
         self.thrown_initial_prompt = row.get("thrown_initial_prompt", "")
         self.thrown_temperature = float(row.get("thrown_temperature", 0.7))
 
@@ -812,10 +812,10 @@ def main():
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
     print("=" * 60)
 
-    if not GROQ_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
+    if not GEMINI_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
         print("[ERROR] Missing environment variables:")
-        if not GROQ_API_KEY:
-            print("  - GROQ_API_KEY")
+        if not GEMINI_API_KEY:
+            print("  - GEMINI_API_KEY")
         if not SUPABASE_URL:
             print("  - SUPABASE_URL")
         if not SUPABASE_KEY:
