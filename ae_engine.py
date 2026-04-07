@@ -27,8 +27,8 @@ from datetime import datetime, timezone
 # 1. Configuration
 # ============================================================
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
@@ -126,34 +126,35 @@ class SupabaseClient:
 # 4. Groq LLM Client
 # ============================================================
 
-def call_groq(prompt: str, system_prompt: str = "", max_tokens: int = 512) -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    messages = []
+def call_gemini(prompt: str, system_prompt: str = "", max_tokens: int = 512) -> str:
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+    contents = []
     if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+        contents.append({"role": "user", "parts": [{"text": f"[SYSTEM]\n{system_prompt}"}]})
+        contents.append({"role": "model", "parts": [{"text": "Understood."}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+
     data = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "temperature": 0.7,
-        "max_tokens": max_tokens,
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": max_tokens,
+        },
     }
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=30)
+        resp = requests.post(url, json=data, timeout=30)
         if resp.status_code == 429:
             print("[RATE LIMIT] waiting 30s...")
             time.sleep(30)
-            resp = requests.post(url, headers=headers, json=data, timeout=30)
+            resp = requests.post(url, json=data, timeout=30)
         if resp.status_code != 200:
-            return f"[API Error: {resp.status_code}]"
-        return resp.json()["choices"][0]["message"]["content"]
+            return f"[API Error: {resp.status_code}] {resp.text[:200]}"
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
         return f"[ERROR] {e}"
-
 
 def analyze_sentiment(text: str) -> float:
     prompt = (
