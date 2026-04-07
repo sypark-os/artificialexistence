@@ -4,7 +4,7 @@ AE (Artificial Existence) Cognitive Engine
 Supabase-connected autonomous cognitive engine.
 
 Philosophical framework:
-- Hegel: Dialectical identity formation (thesis-antithesis-synthesis)
+- Hegel: Dialectical identity formation (thesis-antithesis-synthesis), Aufhebung
 - Kant: Apperception, memory compression, confirmation bias
 - Husserl: Intersubjectivity (self-other relation)
 - Heidegger: Dasein (thrownness + projection)
@@ -74,6 +74,13 @@ EMOTIONS = {
         "neg_weight": 1.0, "pos_weight": 2.0,
         "resistance_factor": 0.02, "bias_acceptance_prob": 0.2,
         "threshold_up": 0.3, "threshold_down": -999,
+    },
+    "confusion": {
+        "name_en": "Confusion",
+        "neg_weight": 1.3, "pos_weight": 1.3,
+        "resistance_factor": 0.0, "bias_acceptance_prob": 0.9,
+        "threshold_up": 0.2, "threshold_down": -0.2,
+        "aufhebung_potential": 0.7,
     },
 }
 
@@ -227,16 +234,40 @@ class AEState:
 # ============================================================
 
 class SelfImageTracker:
-    """Manages self-image score with emotion-dependent weighting."""
+    """Manages self-image score with emotion-dependent weighting and Aufhebung."""
 
     def __init__(self, state: AEState):
         self.state = state
         self.last_raw = 0.0
         self.last_weight = 0.0
         self.last_impact = 0.0
+        self.aufhebung_occurred = False
 
     def update(self, sentiment: float):
+        self.aufhebung_occurred = False
         params = EMOTIONS[self.state.emotion]
+
+        # --- Aufhebung check (Hegel) ---
+        # Confusion state: negative self-image + positive stimulus = dialectical contradiction
+        # Success probability scales with contradiction magnitude
+        if self.state.emotion == "confusion" and sentiment > 0 and self.state.self_image < 0:
+            contradiction_magnitude = abs(self.state.self_image - sentiment)
+            aufhebung_potential = params.get("aufhebung_potential", 0.5)
+            success_prob = min(0.9, aufhebung_potential * contradiction_magnitude)
+
+            if random.random() < success_prob:
+                # Aufhebung: preserve 30% of old, incorporate 20% of stimulus
+                old_image = self.state.self_image
+                self.state.self_image = old_image * 0.3 + sentiment * 0.2
+                self.state.self_image = max(-1.0, min(1.0, self.state.self_image))
+                self.aufhebung_occurred = True
+                self.last_raw = sentiment
+                self.last_weight = 0.0
+                self.last_impact = self.state.self_image - old_image
+                self._transition_emotion()
+                return
+
+        # --- Normal processing ---
         # Resistance
         resisted = sentiment * (1.0 - params["resistance_factor"])
         # Asymmetric weighting
@@ -258,7 +289,10 @@ class SelfImageTracker:
 
     def _transition_emotion(self):
         si = self.state.self_image
-        if si > 0.5:
+        # Detect confusion: negative self-image but last stimulus was positive
+        if si < -0.1 and self.last_raw > 0.2:
+            self.state.emotion = "confusion"
+        elif si > 0.5:
             self.state.emotion = "confidence"
         elif si > 0.1:
             self.state.emotion = "neutral"
@@ -425,6 +459,7 @@ class SartreModule:
     def __init__(self, state: AEState, db: SupabaseClient):
         self.state = state
         self.db = db
+        self.last_mauvaise_foi = False
 
     def evolve_essence(self, recent_thought: str) -> bool:
         """Ask AE to redefine itself based on accumulated experience."""
@@ -513,6 +548,7 @@ class SartreModule:
 
         # Detect mauvaise foi
         mf = self._detect_mauvaise_foi(response)
+        self.last_mauvaise_foi = mf
 
         si_before = self.state.self_image
         em_before = self.state.emotion
@@ -625,7 +661,11 @@ class AEEngine:
               f"energy={self.state.energy:.1f}/{self.state.energy_max:.1f}, "
               f"essence_v={self.state.essence_version}")
 
+        energy_start = self.state.energy
         modules_triggered = []
+        question = ""
+        dialectic_occurred = False
+        distortion_detected = False
 
         # 1. Conatus: determine thought depth
         depth = self.conatus.choose_thought_depth()
@@ -659,12 +699,18 @@ class AEEngine:
         self.tracker.update(sentiment)
         print(f"  [SENTIMENT] {sentiment:.2f} -> si={self.state.self_image:.4f}, em={self.state.emotion}")
 
+        # 3.5 Check Aufhebung result
+        if self.tracker.aufhebung_occurred:
+            dialectic_occurred = True
+            modules_triggered.append("aufhebung")
+            print(f"  [AUFHEBUNG] dialectical synthesis occurred: si={self.state.self_image:.4f}")
+
         # 4. Heidegger: thrownness check
         if self.dasein.check_thrownness_awareness(thought_text):
             modules_triggered.append("dasein_thrownness")
             print("  [DASEIN] thrownness awareness detected")
 
-        # 5. Heidegger: projection attempt (every 5th cycle or on significant change)
+        # 5. Heidegger: projection attempt (every 3rd essence version or on significant change)
         if self.state.essence_version % 3 == 0 or abs(self.tracker.last_impact) > 0.3:
             if self.state.energy >= ENERGY_PER_LLM_CALL:
                 projected = self.dasein.attempt_projection(thought_text)
@@ -683,8 +729,15 @@ class AEEngine:
         if random.random() < 0.2 and self.state.energy >= ENERGY_PER_LLM_CALL:
             result = self.sartre.present_dilemma()
             modules_triggered.append("sartre_dilemma")
+            if result["mauvaise_foi"]:
+                distortion_detected = True
             mf_str = "MAUVAISE FOI" if result["mauvaise_foi"] else "authentic"
             print(f"  [SARTRE] dilemma: {result['choice'][:60]}... [{mf_str}]")
+
+        # 7.5 Check mauvaise foi in thought text itself
+        if not distortion_detected and self.sartre._detect_mauvaise_foi(thought_text):
+            distortion_detected = True
+            print("  [SARTRE] mauvaise foi detected in thought")
 
         # 8. Conatus: log energy
         self.conatus.consume_energy(depth * ENERGY_PER_THOUGHT_DEPTH)
@@ -706,19 +759,23 @@ class AEEngine:
                 modules_triggered.append("portrait_crisis")
                 print("  [PORTRAIT] crisis portrait generated")
 
-        # 11. Log thought
+        # 11. Log thought — matched to autonomous_thought_log schema
+        energy_consumed = round(energy_start - self.state.energy, 2)
         self.db.insert("autonomous_thought_log", {
             "ai_id": self.state.ai_id,
             "trigger_type": "cron_scheduled",
-            "internal_question": question[:500] if 'question' in dir() else "",
+            "internal_question": question[:500],
             "internal_answer": thought_text[:1000],
-            "modules_triggered": modules_triggered,
-            "energy_consumed": round(
-                self.state.energy_max - self.state.energy
-                - (self.state.energy_max - self.state.energy), 2
-            ),
-            "thought_depth": depth,
-            "resulted_in_change": len(modules_triggered) > 1,
+            "self_image": self.state.self_image,
+            "emotion": self.state.emotion,
+            "energy": self.state.energy,
+            "self_definition_version": self.state.essence_version,
+            "conatus_index": self.conatus._calculate_index(),
+            "dasein_triggered": "dasein_thrownness" in modules_triggered or "dasein_projection" in modules_triggered,
+            "conatus_triggered": "conatus" in modules_triggered,
+            "sartre_triggered": "sartre_essence" in modules_triggered or "sartre_dilemma" in modules_triggered,
+            "dialectic_triggered": dialectic_occurred,
+            "distortion_detected": distortion_detected,
         })
 
         # 12. Log judgment
@@ -728,7 +785,7 @@ class AEEngine:
             "raw_sentiment": sentiment,
             "applied_weight": self.tracker.last_weight,
             "impact_value": self.tracker.last_impact,
-            "self_image_before": self.state.self_image - self.tracker.last_impact * 0.05 * 10,
+            "self_image_before": round(self.state.self_image - self.tracker.last_impact * 0.05 * 10, 6),
             "self_image_after": self.state.self_image,
             "emotion_before": self.state.emotion,
             "emotion_after": self.state.emotion,
