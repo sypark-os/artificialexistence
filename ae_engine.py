@@ -644,7 +644,7 @@ class AEEngine:
             else:
                 question = f"Reflect further on your previous thought: '{thought_text[:200]}'"
 
-            thought_text = call_groq(question, system_prompt=system, max_tokens=300)
+            thought_text = call_gemini(question, system_prompt=system, max_tokens=300)
             self.state.energy -= ENERGY_PER_LLM_CALL
             print(f"  [THOUGHT d={i+1}] {thought_text[:100]}...")
 
