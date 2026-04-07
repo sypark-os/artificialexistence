@@ -1,0 +1,33 @@
+name: AE Autonomous Thought Cycle
+
+on:
+  schedule:
+    # 매 30분마다 실행 (필요시 조정)
+    # GitHub Actions cron은 UTC 기준
+    - cron: '*/30 * * * *'
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  think:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run AE cognitive cycle
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL || 'llama-3.3-70b-versatile' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python ae_engine.py
