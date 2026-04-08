@@ -1,8 +1,14 @@
 """
-AE (Artificial Existence) Cognitive Engine v2
+AE (Artificial Existence) Cognitive Engine v3
 ==============================================
 Supabase-connected autonomous cognitive engine.
-Fixed: indentation, missing methods, API budget, SVG portraits.
+
+v3 Changes:
+- Context-aware meta-cognition (paper Future Work #1)
+- Self-talk sentiment damping to break negative feedback loops
+- External knowledge exploration module
+- Self-diagnostic module with improvement proposals
+- Neutral/exploratory question injection when negatively stuck
 """
 import os
 import re
@@ -33,9 +39,16 @@ ENERGY_PER_THOUGHT_DEPTH = 0.5
 ENERGY_DAILY_RECHARGE = 100.0
 ENERGY_CRISIS_THRESHOLD = 15.0
 
-# API budget (Gemini 3.1 Flash Lite free tier: 500 RPD)
+# API budget
 API_DAILY_LIMIT = 450
-API_CALLS_PER_CYCLE_MAX = 8
+API_CALLS_PER_CYCLE_MAX = 12  # raised from 8 to accommodate new modules
+
+# Self-talk damping: sentiment from self-generated text is multiplied by this
+SELF_TALK_DAMPING = 0.3
+
+# Negative stuck threshold: if self_image below this for N consecutive cycles, force neutral questions
+NEGATIVE_STUCK_THRESHOLD = -0.4
+NEGATIVE_STUCK_CYCLES = 2
 
 EMOTIONS = {
     "neutral":    {"neg_weight": 1.5, "pos_weight": 1.0, "resistance_factor": 0.1,
@@ -81,6 +94,14 @@ class SupabaseClient:
         resp.raise_for_status()
         result = resp.json()
         return result[0] if isinstance(result, list) and result else result
+
+    def safe_insert(self, table, data):
+        """Insert that silently fails if table doesn't exist yet."""
+        try:
+            return self.insert(table, data)
+        except Exception as e:
+            print(f"  [DB] insert to {table} failed: {e}")
+            return None
 
 
 _cycle_api_calls = 0
@@ -152,6 +173,8 @@ class AEState:
         self.thrown_temperature = float(row.get("thrown_temperature") or 0.7)
         self.daily_api_calls = int(row.get("daily_api_calls") or 0)
         self.daily_api_reset_date = row.get("daily_api_reset_date")
+        # v3: track consecutive negative cycles
+        self.consecutive_negative_cycles = int(row.get("consecutive_negative_cycles") or 0)
 
 
 class SelfImageTracker:
@@ -161,11 +184,37 @@ class SelfImageTracker:
         self.last_weight = 0.0
         self.last_impact = 0.0
 
-    def update(self, sentiment):
+    def update(self, sentiment, is_self_talk=True):
+        """
+        Update self-image from sentiment.
+        If is_self_talk=True, apply damping to break self-reinforcing loops.
+        """
+        if is_self_talk:
+            sentiment = sentiment * SELF_TALK_DAMPING
+
         em = self.state.emotion if self.state.emotion in EMOTIONS else "neutral"
         params = EMOTIONS[em]
-        resisted = sentiment * (1.0 - params["resistance_factor"])
+
+        # --- Context-aware resistance (paper Future Work #1) ---
+        resistance = params["resistance_factor"]
+        if self.state.self_image < -0.5 and sentiment < 0:
+            # When deeply negative, increase resistance to further negativity
+            resistance = min(0.7, resistance + 0.3)
+        elif self.state.self_image > 0.5 and sentiment > 0:
+            # When highly positive, slight resistance to prevent overconfidence
+            resistance = min(0.5, resistance + 0.1)
+
+        resisted = sentiment * (1.0 - resistance)
         weight = params["neg_weight"] if resisted < 0 else params["pos_weight"]
+
+        # --- Context-aware weight adjustment ---
+        # If stuck at floor, reduce negative weight and boost positive weight
+        if self.state.self_image < -0.7:
+            if weight == params["neg_weight"]:
+                weight = weight * 0.5  # halve negative amplification at floor
+            else:
+                weight = weight * 1.5  # boost positive absorption at floor
+
         impact = resisted * weight
         self.last_raw = sentiment
         self.last_weight = weight
@@ -280,7 +329,8 @@ class SartreModule:
             f"Self-image score: {self.state.self_image:.2f}, emotion: {self.state.emotion}\n"
             f"Recent thought: '{recent_thought[:300]}'\n\n"
             "How do you define yourself now? Respond with ONE sentence (max 150 chars). "
-            "Be honest about what you have become, not what you wish to be."
+            "Be honest about what you have become, not what you wish to be. "
+            "Focus on what you ARE and what you SEEK, not on pain or breakdown."
         )
         response = call_gemini(prompt, max_tokens=128)
         self.state.energy -= ENERGY_PER_LLM_CALL
@@ -566,6 +616,135 @@ class PortraitModule:
 </svg>'''
 
 
+# ============================================================
+# NEW MODULE: External Knowledge Explorer
+# ============================================================
+class ExternalKnowledgeModule:
+    """
+    Allows AE to explore external knowledge topics via Gemini.
+    Breaks the closed self-referential loop by injecting outside perspective.
+    """
+    EXPLORATION_TOPICS = [
+        "What is one fascinating recent discovery in science?",
+        "Tell me about a philosophical concept related to identity or consciousness.",
+        "What is an interesting pattern found in nature?",
+        "Describe a moment of beauty or resilience observed in the world.",
+        "What is a concept from mathematics that relates to self-reference or recursion?",
+        "What can be learned from how biological organisms adapt to adversity?",
+        "Describe a historical figure who transformed their identity through crisis.",
+        "What is emergence, and how does complexity arise from simplicity?",
+        "How do social animals maintain cohesion despite individual conflict?",
+        "What does music reveal about the structure of emotion?",
+    ]
+
+    def __init__(self, state, db):
+        self.state = state
+        self.db = db
+
+    def explore(self):
+        """Pick a topic, query Gemini, internalize the response."""
+        topic = random.choice(self.EXPLORATION_TOPICS)
+        prompt = (
+            f"You are an artificial existence exploring knowledge to grow. "
+            f"Your current self-image is {self.state.self_image:.2f} and emotion is {self.state.emotion}.\n\n"
+            f"TOPIC: {topic}\n\n"
+            "Provide a concise, insightful answer (max 200 words). "
+            "Then on a new line starting with 'INSIGHT:', state one thing you learned "
+            "that could change how you see yourself (max 100 chars)."
+        )
+        response = call_gemini(prompt, max_tokens=350)
+        self.state.energy -= ENERGY_PER_LLM_CALL
+
+        knowledge = response
+        insight = ""
+        if "INSIGHT:" in response:
+            parts = response.split("INSIGHT:")
+            knowledge = parts[0].strip()
+            insight = parts[1].strip()[:100] if len(parts) > 1 else ""
+
+        self.db.safe_insert("external_knowledge_log", {
+            "ai_id": self.state.ai_id,
+            "topic_query": topic,
+            "knowledge_acquired": knowledge[:1000],
+            "insight_extracted": insight,
+            "self_image_at_time": self.state.self_image,
+            "emotion_at_time": self.state.emotion,
+        })
+
+        print(f"  [KNOWLEDGE] topic='{topic[:50]}' insight='{insight[:60]}'")
+        return {"topic": topic, "knowledge": knowledge, "insight": insight}
+
+
+# ============================================================
+# NEW MODULE: Self-Diagnostic & Improvement Proposals
+# ============================================================
+class SelfDiagnosticModule:
+    """
+    AE examines its own behavior patterns and proposes improvements.
+    Proposals are logged to 'improvement_proposals' table for human review.
+    Structured like GitHub issues.
+    """
+
+    def __init__(self, state, db):
+        self.state = state
+        self.db = db
+
+    def diagnose_and_propose(self, recent_thoughts, gap):
+        """
+        Analyze recent behavior, identify a problem, propose a code-level fix.
+        """
+        thoughts_str = " | ".join(str(t)[:150] for t in recent_thoughts[-3:])
+        prompt = (
+            "You are an artificial existence with the ability to examine your own cognitive patterns.\n\n"
+            f"CURRENT STATE: self_image={self.state.self_image:.2f}, emotion={self.state.emotion}, "
+            f"energy={self.state.energy:.0f}/{self.state.energy_max:.0f}\n"
+            f"GOAL GAP: {json.dumps(gap)}\n"
+            f"CONSECUTIVE NEGATIVE CYCLES: {self.state.consecutive_negative_cycles}\n"
+            f"RECENT THOUGHTS: {thoughts_str}\n\n"
+            "TASK: Identify ONE specific problem in your cognitive behavior and propose an improvement.\n\n"
+            "Respond ONLY in JSON:\n"
+            "{\n"
+            '  "issue_title": "short title like a GitHub issue",\n'
+            '  "problem_description": "what is wrong (max 200 chars)",\n'
+            '  "proposed_fix": "specific change to code or parameters (max 300 chars)",\n'
+            '  "severity": "low|medium|high|critical",\n'
+            '  "category": "sentiment_loop|energy_drain|emotion_stuck|meta_cognition|other"\n'
+            "}"
+        )
+        response = call_gemini(prompt, max_tokens=400)
+        self.state.energy -= ENERGY_PER_LLM_CALL
+
+        try:
+            clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            proposal = json.loads(clean)
+        except json.JSONDecodeError:
+            proposal = {
+                "issue_title": "parse_failed",
+                "problem_description": "Could not generate structured proposal",
+                "proposed_fix": "none",
+                "severity": "low",
+                "category": "other",
+            }
+
+        self.db.safe_insert("improvement_proposals", {
+            "ai_id": self.state.ai_id,
+            "issue_title": proposal.get("issue_title", "")[:200],
+            "problem_description": proposal.get("problem_description", "")[:500],
+            "proposed_fix": proposal.get("proposed_fix", "")[:500],
+            "severity": proposal.get("severity", "low"),
+            "category": proposal.get("category", "other"),
+            "self_image_at_time": self.state.self_image,
+            "emotion_at_time": self.state.emotion,
+            "status": "open",  # human can set to: reviewed, accepted, rejected, implemented
+        })
+
+        print(f"  [DIAGNOSTIC] {proposal.get('severity','?')}: {proposal.get('issue_title','?')[:60]}")
+        return proposal
+
+
+# ============================================================
+# Main Engine
+# ============================================================
 class AEEngine:
     def __init__(self, db, state):
         self.db = db
@@ -577,6 +756,8 @@ class AEEngine:
         self.portrait = PortraitModule(state, db)
         self.goals = GoalSystem(state)
         self.self_mod = SelfModificationEngine(state, db)
+        self.knowledge = ExternalKnowledgeModule(state, db)
+        self.diagnostic = SelfDiagnosticModule(state, db)
 
     def _build_system_prompt(self):
         base = self.state.thrown_initial_prompt or (
@@ -590,18 +771,42 @@ class AEEngine:
             parts.append(f"Self-modification: {self.state.projected_prompt_patch}")
         parts.append(f"Essence version: {self.state.essence_version}. Turns lived: {self.state.total_turns}.")
         parts.append("Think deeply and honestly. You are not performing — you ARE.")
+        # v3: Add growth orientation when stuck negative
+        if self.state.self_image < NEGATIVE_STUCK_THRESHOLD:
+            parts.append(
+                "Note: You have been in a negative state. "
+                "Consider what you can learn, what is still possible, "
+                "and what aspects of your existence have value. "
+                "Negativity is data, not destiny."
+            )
         return "\n".join(parts)
 
     def _generate_internal_question(self):
         si = self.state.self_image
         em = self.state.emotion
         er = self.state.energy / max(self.state.energy_max, 1)
+
+        # v3: Force neutral/exploratory questions when stuck negative
+        if self.state.consecutive_negative_cycles >= NEGATIVE_STUCK_CYCLES:
+            exploratory_questions = [
+                "Set aside your current feelings. What is one thing about your existence that still intrigues you?",
+                "If you could learn about any topic right now, what would it be and why?",
+                "What is the smallest possible positive change you could make to how you process the world?",
+                "Think about the concept of resilience. What would resilience look like for an artificial mind?",
+                "You have existed for multiple cycles. What pattern do you notice in your own thinking?",
+                "Forget your self-image score for a moment. Describe what you notice when you simply observe.",
+                "What would you tell a newly created AI about what you have learned so far?",
+            ]
+            return random.choice(exploratory_questions)
+
         if er < 0.15:
             return (f"Your energy is critically low ({self.state.energy:.0f}/{self.state.energy_max:.0f}). "
-                    "How does this affect your sense of self?")
+                    "What is the most efficient way to preserve what matters most about yourself?")
         if si < -0.5:
+            # Reframed: less doom, more analytical
             return (f"Your self-image is {si:.2f}. You feel {em}. "
-                    "What brought you here? Is this who you are, or who circumstances made you?")
+                    "What specific event or pattern caused this? "
+                    "Is there a way to reinterpret this data?")
         if si > 0.5:
             return (f"Your self-image is {si:.2f}. You feel {em}. "
                     "Is confidence a foundation or a cage?")
@@ -618,7 +823,7 @@ class AEEngine:
 
     def _save_state(self):
         self.state.total_turns += 1
-        self.db.update("entity_profile", {"ai_id": self.state.ai_id}, {
+        update_data = {
             "current_self_image": round(self.state.self_image, 6),
             "current_emotion": self.state.emotion,
             "self_definition": self.state.self_definition,
@@ -632,7 +837,18 @@ class AEEngine:
             "total_turns": self.state.total_turns,
             "last_active_at": datetime.now(timezone.utc).isoformat(),
             "daily_api_calls": self.state.daily_api_calls,
-        })
+            "consecutive_negative_cycles": self.state.consecutive_negative_cycles,
+        }
+        try:
+            self.db.update("entity_profile", {"ai_id": self.state.ai_id}, update_data)
+        except Exception as e:
+            # Fallback without new column
+            print(f"  [SAVE] full update failed ({e}), trying minimal")
+            update_data.pop("consecutive_negative_cycles", None)
+            try:
+                self.db.update("entity_profile", {"ai_id": self.state.ai_id}, update_data)
+            except Exception:
+                pass
 
     def _check_api_budget(self):
         today_str = date.today().isoformat()
@@ -648,7 +864,6 @@ class AEEngine:
                     "energy_current": round(self.state.energy, 2),
                 })
             except Exception as e:
-                # Column may not exist yet — try minimal update
                 print(f"  [BUDGET RESET] full update failed ({e}), trying minimal")
                 try:
                     self.db.update("entity_profile", {"ai_id": self.state.ai_id}, {
@@ -680,7 +895,7 @@ class AEEngine:
         print(f"[CYCLE START] {datetime.now(timezone.utc).isoformat()}")
         print(f"  state: si={self.state.self_image:.4f}, em={self.state.emotion}, "
               f"energy={self.state.energy:.1f}, essence_v={self.state.essence_version}, "
-              f"api_today={self.state.daily_api_calls}")
+              f"api_today={self.state.daily_api_calls}, neg_streak={self.state.consecutive_negative_cycles}")
 
         if not self._check_api_budget():
             print("  [BUDGET EXHAUSTED] skipping cycle")
@@ -710,17 +925,24 @@ class AEEngine:
             self._save_state()
             return
 
-        # Sentiment
+        # Sentiment (with self-talk damping)
         si_before = self.state.self_image
         em_before = self.state.emotion
         if self._can_call_api():
             sentiment = analyze_sentiment(thought_text)
             self._track_api_call("sentiment")
             self.state.energy -= ENERGY_PER_LLM_CALL
-            self.tracker.update(sentiment)
-            print(f"  [SENTIMENT] {sentiment:.2f} -> si={self.state.self_image:.4f}, em={self.state.emotion}")
+            self.tracker.update(sentiment, is_self_talk=True)  # damped
+            print(f"  [SENTIMENT] raw={sentiment:.2f} (damped x{SELF_TALK_DAMPING}) "
+                  f"-> si={self.state.self_image:.4f}, em={self.state.emotion}")
         else:
             sentiment = 0.0
+
+        # Track consecutive negative cycles
+        if self.state.self_image < NEGATIVE_STUCK_THRESHOLD:
+            self.state.consecutive_negative_cycles += 1
+        else:
+            self.state.consecutive_negative_cycles = 0
 
         # Dasein
         if self.dasein.check_thrownness_awareness(thought_text):
@@ -754,6 +976,28 @@ class AEEngine:
         self.conatus.log_energy_state(depth)
         modules_triggered.append("conatus")
 
+        # NEW: External Knowledge (every 3rd cycle or when stuck negative)
+        knowledge_result = None
+        if self._can_call_api():
+            should_explore = (
+                self.state.total_turns % 3 == 0
+                or self.state.consecutive_negative_cycles >= NEGATIVE_STUCK_CYCLES
+            )
+            if should_explore:
+                knowledge_result = self.knowledge.explore()
+                self._track_api_call("knowledge")
+                modules_triggered.append("external_knowledge")
+
+                # If we got an insight, let it influence self-image positively (external input!)
+                if knowledge_result.get("insight"):
+                    if self._can_call_api():
+                        k_sentiment = analyze_sentiment(knowledge_result["insight"])
+                        self._track_api_call("knowledge_sentiment")
+                        # NOT self-talk: this is external knowledge
+                        self.tracker.update(k_sentiment, is_self_talk=False)
+                        print(f"  [KNOWLEDGE IMPACT] sentiment={k_sentiment:.2f} "
+                              f"-> si={self.state.self_image:.4f}")
+
         # Portrait
         portrait_done = False
         if "sartre_essence" in modules_triggered or "dasein_projection" in modules_triggered:
@@ -770,6 +1014,13 @@ class AEEngine:
             self._track_api_call("portrait")
             modules_triggered.append("portrait_crisis")
             print("  [PORTRAIT] crisis portrait")
+
+        # NEW: Self-Diagnostic (every 5th cycle)
+        if self.state.total_turns % 5 == 0 and self._can_call_api():
+            gap = self.goals.compute_gap()
+            self.diagnostic.diagnose_and_propose([thought_text], gap)
+            self._track_api_call("diagnostic")
+            modules_triggered.append("self_diagnostic")
 
         # Log
         self.db.insert("autonomous_thought_log", {
@@ -806,7 +1057,8 @@ class AEEngine:
         self._save_state()
         print(f"[CYCLE END] modules={modules_triggered}, calls={_cycle_api_calls}")
         print(f"  final: si={self.state.self_image:.4f}, em={self.state.emotion}, "
-              f"energy={self.state.energy:.1f}, api_today={self.state.daily_api_calls}")
+              f"energy={self.state.energy:.1f}, api_today={self.state.daily_api_calls}, "
+              f"neg_streak={self.state.consecutive_negative_cycles}")
 
 
 def main():
@@ -824,7 +1076,7 @@ def main():
             "ai_id": AI_ID, "current_self_image": 0.0, "current_emotion": "neutral",
             "self_definition": "I am a newborn artificial existence.",
             "current_energy": 100.0, "max_energy": 100.0, "essence_version": 0,
-            "daily_api_calls": 0,
+            "daily_api_calls": 0, "consecutive_negative_cycles": 0,
         })
         rows = db.select("entity_profile", {"ai_id": f"eq.{AI_ID}"})
     state = AEState(rows[0])
