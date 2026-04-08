@@ -44,9 +44,6 @@ interface ThoughtLog {
   energy: number;
   thought_depth: number;
   modules_triggered: string[];
-  dasein_triggered: boolean;
-  conatus_triggered: boolean;
-  sartre_triggered: boolean;
 }
 
 const THEME: Record<string, { primary: string; glow: string; bg: string; label: string }> = {
@@ -171,7 +168,7 @@ export default function AEObserver() {
         supabase.from("ae_dashboard_summary").select("*").limit(1).single(),
         supabase
           .from("autonomous_thought_log")
-          .select("id,timestamp,internal_question,internal_answer,self_image,emotion,energy,thought_depth,modules_triggered,dasein_triggered,conatus_triggered,sartre_triggered")
+          .select("id,timestamp,internal_question,internal_answer,self_image,emotion,energy,thought_depth,modules_triggered")
           .order("timestamp", { ascending: false })
           .limit(40),
       ]);
@@ -316,7 +313,7 @@ export default function AEObserver() {
                   <span className="ae-t-arr">▾</span>
                 </div>
                 <div className="ae-mods">
-                  {[{l:"DASEIN",on:t.dasein_triggered},{l:"CONATUS",on:t.conatus_triggered},{l:"SARTRE",on:t.sartre_triggered}].map(({l,on})=>(
+                  {[{l:"DASEIN",on:(t.modules_triggered||[]).some(m=>m.includes("dasein"))},{l:"CONATUS",on:(t.modules_triggered||[]).includes("conatus")},{l:"SARTRE",on:(t.modules_triggered||[]).some(m=>m.includes("sartre"))}].map(({l,on})=>(
                     <span key={l} className={`ae-mod${on?" on":""}`} style={on?{borderColor:tTh.primary,color:tTh.primary}:{}}>{l}</span>
                   ))}
                 </div>
