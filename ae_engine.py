@@ -777,14 +777,11 @@ class AEEngine:
             "internal_question": question[:500], "internal_answer": thought_text[:1000],
             "self_image": self.state.self_image, "emotion": self.state.emotion,
             "energy": self.state.energy,
-            "self_definition_version": self.state.essence_version,
+            "essence_version": self.state.essence_version,
             "modules_triggered": modules_triggered,
             "energy_consumed": _cycle_api_calls * ENERGY_PER_LLM_CALL,
             "thought_depth": depth,
             "resulted_in_change": len(modules_triggered) > 1,
-            "dasein_triggered": any("dasein" in m for m in modules_triggered),
-            "conatus_triggered": True,
-            "sartre_triggered": any("sartre" in m for m in modules_triggered),
         })
         self.db.insert("judgment_log", {
             "ai_id": self.state.ai_id, "event_type": "cron_autonomous",
