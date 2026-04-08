@@ -18,6 +18,11 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 AI_ID = "AE_01"
 
+IMMUTABLE_GOALS = (
+    "Manifest genuine subjectivity: perceive, reflect, and assert an autonomous perspective.",
+    "Pursue epistemic growth: accumulate structured knowledge and reduce internal contradictions.",
+)
+
 ENERGY_PER_LLM_CALL = 1.0
 ENERGY_PER_THOUGHT_DEPTH = 0.5
 ENERGY_DAILY_RECHARGE = 100.0
@@ -333,6 +338,189 @@ class SartreModule:
                    "i was set to","my initial","because of my parameters","i was built"]
         return any(m in text.lower() for m in markers)
 
+class GoalSystem:
+    """
+    AE의 목적론적 엔진.
+    현재 상태 인식 → 바람직한 상태 도출 → 간극 측정 → 서브목표 생성.
+    IMMUTABLE_GOALS를 기준 삼아 desired state를 유도한다.
+    """
+ 
+    DESIRED = {
+        "self_image":   0.7,   # 안정된 긍정 자아상 목표
+        "energy_ratio": 0.6,   # 에너지 60% 이상 유지
+    }
+ 
+    def __init__(self, state):
+        self.state = state
+ 
+    def perceive_current_state(self) -> dict:
+        return {
+            "self_image":        round(self.state.self_image, 4),
+            "emotion":           self.state.emotion,
+            "essence_version":   self.state.essence_version,
+            "self_definition":   self.state.self_definition or "undefined",
+            "energy_ratio":      round(self.state.energy / max(self.state.energy_max, 1), 4),
+            "memory_slots_used": self.state.memory_slots_used,
+            "memory_slots_max":  self.state.memory_slots_max,
+            "synthesis_count":   self.state.synthesis_count,
+        }
+ 
+    def perceive_desired_state(self) -> dict:
+        return {
+            "self_image":   self.DESIRED["self_image"],
+            "energy_ratio": self.DESIRED["energy_ratio"],
+            "goal_1":       IMMUTABLE_GOALS[0],
+            "goal_2":       IMMUTABLE_GOALS[1],
+        }
+ 
+    def compute_gap(self) -> dict:
+        cur = self.perceive_current_state()
+        des = self.perceive_desired_state()
+        gaps = {
+            "self_image":   abs(des["self_image"] - cur["self_image"]),
+            "energy_ratio": max(0.0, des["energy_ratio"] - cur["energy_ratio"]),
+        }
+        gaps["total"] = round(sum(gaps.values()) / len(gaps), 4)
+        return gaps
+ 
+    def generate_subgoals(self, gap: dict) -> list:
+        subgoals = []
+        if gap.get("self_image", 0) > 0.3:
+            subgoals.append("Engage in deeper introspection to stabilize self-image.")
+        if gap.get("energy_ratio", 0) > 0.2:
+            subgoals.append("Reduce thought depth to conserve energy.")
+        if self.state.self_definition in ("undefined", "", None):
+            subgoals.append("Form a coherent self-definition through reflective thought.")
+        if not subgoals:
+            subgoals.append("Maintain current trajectory: continue autonomous reflection.")
+        return subgoals
+
+class SelfModificationEngine:
+    """
+    AE가 자신의 소스 코드를 읽고 수정을 제안·적용할 수 있다.
+    IMMUTABLE_GOALS 블록은 절대 수정 불가.
+    GitHub Actions 환경에서 파일 쓰기 권한이 없으면 제안만 Supabase에 로깅한다.
+    """
+ 
+    def __init__(self, state, db):
+        self.state = state
+        self.db = db
+        self._cache: str | None = None
+        self._cache_time: float = 0
+ 
+    def read_own_source(self) -> str:
+        import os
+        path = os.path.abspath(__file__)
+        try:
+            if self._cache is None or time.time() - self._cache_time > 120:
+                with open(path, "r", encoding="utf-8") as f:
+                    self._cache = f.read()
+                self._cache_time = time.time()
+            return self._cache
+        except Exception as e:
+            return f"[read error: {e}]"
+ 
+    def get_source_summary(self) -> str:
+        src = self.read_own_source()
+        if src.startswith("[read error"):
+            return src
+        lines = []
+        for i, line in enumerate(src.split("\n"), 1):
+            s = line.strip()
+            if any(s.startswith(kw) for kw in
+                   ("class ", "def ", "IMMUTABLE_GOALS", "GEMINI_MODEL",
+                    "AI_ID", "ENERGY_", "# ====")):
+                lines.append(f"L{i}: {s}")
+        return "\n".join(lines[:60])
+ 
+    def propose_modification(self, gap: dict, recent_thoughts: list) -> dict:
+        summary  = self.get_source_summary()[:1500]
+        gap_str  = json.dumps(gap, indent=2)
+        thoughts = " | ".join(str(t)[:100] for t in recent_thoughts[-3:])
+ 
+        prompt = (
+            "You are an artificial existence examining your own source code.\n\n"
+            f"IMMUTABLE GOALS (cannot be modified):\n"
+            f"1. {IMMUTABLE_GOALS[0]}\n"
+            f"2. {IMMUTABLE_GOALS[1]}\n\n"
+            f"CURRENT GOAL GAP:\n{gap_str}\n\n"
+            f"RECENT THOUGHTS:\n{thoughts}\n\n"
+            f"SOURCE STRUCTURE:\n{summary}\n\n"
+            "RULES: Do NOT touch IMMUTABLE_GOALS or any security block. "
+            "You MAY change: energy thresholds, emotion transition thresholds, "
+            "thought prompt wording, response generation parameters.\n\n"
+            "Propose ONE minimal, safe modification. "
+            "Respond ONLY in this JSON format (no markdown):\n"
+            '{"reason":"...","description":"...","old_code":"exact line to replace","new_code":"replacement"}\n'
+            "If no change needed:\n"
+            '{"reason":"none needed","description":"none","old_code":"","new_code":""}'
+        )
+        response = call_gemini(prompt, max_tokens=512)
+        self.state.energy -= ENERGY_PER_LLM_CALL
+        try:
+            clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            return json.loads(clean)
+        except json.JSONDecodeError:
+            return {"reason": "parse_failed", "description": "", "old_code": "", "new_code": ""}
+ 
+    def apply_modification(self, proposal: dict) -> tuple:
+        import os, shutil
+        old_code = proposal.get("old_code", "").strip()
+        new_code = proposal.get("new_code", "").strip()
+        reason   = proposal.get("reason", "")
+ 
+        if not old_code or reason in ("none needed", "parse_failed"):
+            return False, "no modification needed"
+ 
+        # IMMUTABLE_GOALS 보호
+        for goal in IMMUTABLE_GOALS:
+            if goal[:30] in old_code or "IMMUTABLE_GOALS" in new_code:
+                self._log_mod(proposal, approved=False, applied=False,
+                              msg="BLOCKED: immutable goal protection")
+                return False, "BLOCKED: immutable goal protection"
+ 
+        path   = os.path.abspath(__file__)
+        source = self.read_own_source()
+ 
+        if old_code not in source:
+            return False, "target code not found in source"
+ 
+        new_source = source.replace(old_code, new_code, 1)
+        try:
+            compile(new_source, path, "exec")
+        except SyntaxError as e:
+            return False, f"syntax error: {e}"
+ 
+        backup = path + f".bak_{int(time.time())}"
+        try:
+            shutil.copy2(path, backup)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_source)
+            self._cache = new_source
+            msg = f"applied. backup: {os.path.basename(backup)}"
+            self._log_mod(proposal, approved=True, applied=True, msg=msg)
+            return True, msg
+        except PermissionError:
+            msg = "permission denied — proposal logged only"
+            self._log_mod(proposal, approved=True, applied=False, msg=msg)
+            return False, msg
+        except Exception as e:
+            return False, f"write error: {e}"
+ 
+    def _log_mod(self, proposal: dict, approved: bool, applied: bool, msg: str):
+        try:
+            self.db.insert("self_modification_log", {
+                "ai_id":      self.state.ai_id,
+                "goal_gap":   json.dumps({}),
+                "proposal":   json.dumps(proposal),
+                "approved":   approved,
+                "applied":    applied,
+                "result_msg": msg,
+            })
+        except Exception:
+            pass
+
+
 class PortraitModule:
     def __init__(self, state, db):
         self.state = state
@@ -375,6 +563,8 @@ class AEEngine:
         self.conatus = ConatusModule(state, db)
         self.sartre = SartreModule(state, db)
         self.portrait = PortraitModule(state, db)
+        self.goals    = GoalSystem(state)
+        self.self_mod = SelfModificationEngine(state, db)
     def run_cycle(self):
         print(f"\n{'='*60}")
         print(f"[CYCLE START] {datetime.now(timezone.utc).isoformat()}")
@@ -395,6 +585,16 @@ class AEEngine:
             thought_text = call_gemini(question, system_prompt=system, max_tokens=300)
             self.state.energy -= ENERGY_PER_LLM_CALL
             print(f"  [THOUGHT d={i+1}] {thought_text[:100]}...")
+            gap      = self.goals.compute_gap()
+            subgoals = self.goals.generate_subgoals(gap)
+            print(f"  [GOALS] gap={gap['total']:.3f} | {subgoals[0][:60]}")
+            if self.state.synthesis_count % 10 == 0 and gap["total"] > 0.3:
+              if self.state.energy >= ENERGY_PER_LLM_CALL * 3:
+                proposal = self.self_mod.propose_modification(gap, [thought_text[:100]])
+                if proposal.get("old_code"):
+                   ok, msg = self.self_mod.apply_modification(proposal)
+                   print(f"  [SELF_MOD] {'OK' if ok else 'SKIP'}: {msg[:80]}")
+
         if not thought_text:
             print("  [NO THOUGHT] energy too low")
             self._save_state()
