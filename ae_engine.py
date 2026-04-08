@@ -519,7 +519,7 @@ class PortraitModule:
             ascii_art = "\n".join(art_lines[:12])
         svg_art = self._generate_svg()
         row = self.db.insert("self_portrait", {
-            "ai_id": self.state.ai_id, "ascii_art": ascii_art,
+            "ai_id": self.state.ai_id, "svg_code": ascii_art,
             "svg_art": svg_art, "portrait_type": "svg",
             "description": description, "trigger_reason": trigger_reason,
             "self_image_at_time": self.state.self_image,
@@ -640,12 +640,23 @@ class AEEngine:
         if reset_date != today_str:
             self.state.daily_api_calls = 0
             self.state.energy = min(self.state.energy + ENERGY_DAILY_RECHARGE, self.state.energy_max)
-            self.db.update("entity_profile", {"ai_id": self.state.ai_id}, {
-                "daily_api_calls": 0,
-                "daily_api_reset_date": today_str,
-                "current_energy": round(self.state.energy, 2),
-                "energy_current": round(self.state.energy, 2),
-            })
+            try:
+                self.db.update("entity_profile", {"ai_id": self.state.ai_id}, {
+                    "daily_api_calls": 0,
+                    "daily_api_reset_date": today_str,
+                    "current_energy": round(self.state.energy, 2),
+                    "energy_current": round(self.state.energy, 2),
+                })
+            except Exception as e:
+                # Column may not exist yet — try minimal update
+                print(f"  [BUDGET RESET] full update failed ({e}), trying minimal")
+                try:
+                    self.db.update("entity_profile", {"ai_id": self.state.ai_id}, {
+                        "daily_api_calls": 0,
+                        "current_energy": round(self.state.energy, 2),
+                    })
+                except Exception:
+                    pass
         return self.state.daily_api_calls < API_DAILY_LIMIT
 
     def _track_api_call(self, call_type):
