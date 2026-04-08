@@ -143,8 +143,8 @@ class AEState:
         self.projected_prompt_patch = row.get("projected_prompt_patch") or ""
         self.energy = float(row.get("current_energy") or 100.0)
         self.energy_max = float(row.get("max_energy") or 100.0)
-        self.memory_slots_used = int(row.get("current_memory_slots") or 0)
-        self.memory_slots_max = int(row.get("max_memory_slots") or 50)
+        self.memory_slots_used = int(row.get("memory_slots_used") or 0)
+        self.memory_slots_max = int(row.get("memory_slots_max") or 50)
         self.synthesis_count = int(row.get("synthesis_count") or 0)
         self.total_turns = int(row.get("total_turns") or 0)
         self.thrown_model = row.get("thrown_model") or GEMINI_MODEL
@@ -628,7 +628,7 @@ class AEEngine:
             "essence_version": self.state.essence_version,
             "projected_prompt_patch": self.state.projected_prompt_patch,
             "synthesis_count": self.state.synthesis_count,
-            "current_memory_slots": self.state.memory_slots_used,
+            "memory_slots_used": self.state.memory_slots_used,
             "total_turns": self.state.total_turns,
             "last_active_at": datetime.now(timezone.utc).isoformat(),
             "daily_api_calls": self.state.daily_api_calls,
