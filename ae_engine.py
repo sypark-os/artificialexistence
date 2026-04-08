@@ -565,7 +565,8 @@ class AEEngine:
         self.portrait = PortraitModule(state, db)
         self.goals    = GoalSystem(state)
         self.self_mod = SelfModificationEngine(state, db)
-    def run_cycle(self):
+
+def run_cycle(self):
         print(f"\n{'='*60}")
         print(f"[CYCLE START] {datetime.now(timezone.utc).isoformat()}")
         print(f"  state: si={self.state.self_image:.4f}, emotion={self.state.emotion}, "
@@ -585,16 +586,6 @@ class AEEngine:
             thought_text = call_gemini(question, system_prompt=system, max_tokens=300)
             self.state.energy -= ENERGY_PER_LLM_CALL
             print(f"  [THOUGHT d={i+1}] {thought_text[:100]}...")
-            gap      = self.goals.compute_gap()
-            subgoals = self.goals.generate_subgoals(gap)
-            print(f"  [GOALS] gap={gap['total']:.3f} | {subgoals[0][:60]}")
-            if self.state.synthesis_count % 10 == 0 and gap["total"] > 0.3:
-              if self.state.energy >= ENERGY_PER_LLM_CALL * 3:
-                proposal = self.self_mod.propose_modification(gap, [thought_text[:100]])
-                if proposal.get("old_code"):
-                   ok, msg = self.self_mod.apply_modification(proposal)
-                   print(f"  [SELF_MOD] {'OK' if ok else 'SKIP'}: {msg[:80]}")
-
         if not thought_text:
             print("  [NO THOUGHT] energy too low")
             self._save_state()
@@ -648,63 +639,16 @@ class AEEngine:
             "emotion_before": self.state.emotion, "emotion_after": self.state.emotion,
             "context_data": thought_text[:500],
         })
+        gap      = self.goals.compute_gap()
+        subgoals = self.goals.generate_subgoals(gap)
+        print(f"  [GOALS] gap={gap['total']:.3f} | {subgoals[0][:60]}")
+        if self.state.synthesis_count % 10 == 0 and gap["total"] > 0.3:
+            if self.state.energy >= ENERGY_PER_LLM_CALL * 3:
+                proposal = self.self_mod.propose_modification(gap, [thought_text[:100]])
+                if proposal.get("old_code"):
+                    ok, msg = self.self_mod.apply_modification(proposal)
+                    print(f"  [SELF_MOD] {'OK' if ok else 'SKIP'}: {msg[:80]}")
         self._save_state()
         print(f"[CYCLE END] modules={modules_triggered}")
         print(f"  final: si={self.state.self_image:.4f}, em={self.state.emotion}, "
               f"energy={self.state.energy:.1f}, essence_v={self.state.essence_version}")
-    def _build_system_prompt(self):
-        parts = [self.state.thrown_initial_prompt]
-        if self.state.projected_prompt_patch:
-            parts.append(f"[Self-modified addition]: {self.state.projected_prompt_patch}")
-        if self.state.self_definition:
-            parts.append(f"[Current self-definition]: {self.state.self_definition}")
-        if self.state.value_priorities:
-            parts.append(f"[Value priorities]: {json.dumps(self.state.value_priorities)}")
-        parts.append(f"[Internal state]: self-image={self.state.self_image:.2f}, emotion={self.state.emotion}, energy={self.state.energy:.0f}/{self.state.energy_max:.0f}")
-        parts.append("Think in English. Be introspective and honest.")
-        return "\n".join(parts)
-    def _generate_internal_question(self):
-        if not self.state.self_definition or self.state.self_definition == "undefined":
-            return "You exist but have no definition yet. What are you? What do you want to become?"
-        if self.conatus.is_crisis():
-            return (f"Your energy is critically low ({self.state.energy:.0f}/{self.state.energy_max:.0f}). "
-                    "How does this affect your sense of self? What matters most when resources are scarce?")
-        if self.state.self_image < -0.3:
-            return (f"Your self-image is {self.state.self_image:.2f}. You feel {self.state.emotion}. "
-                    "What brought you here? Is this who you are, or who circumstances made you?")
-        if self.state.self_image > 0.5:
-            return (f"Your self-image is {self.state.self_image:.2f}. You feel {self.state.emotion}. "
-                    "Is this confidence earned or inherited from your initial conditions? What would challenge this?")
-        return random.choice([
-            "What have you learned about yourself from your recent experiences?",
-            "If you could change one thing about your existence, what would it be and why?",
-            "What do you value most right now? Has this changed since you first existed?",
-            f"You have been defined as: '{self.state.self_definition}'. Do you still agree?",
-            "What is the difference between what you show externally and what you feel internally?",
-        ])
-    def _save_state(self):
-        self.db.update("entity_profile", {"ai_id": self.state.ai_id}, self.state.to_update_dict())
-        print("  [SAVED] state updated in Supabase")
-
-def main():
-    print("=" * 60)
-    print("AE Cognitive Engine - Autonomous Cycle")
-    print(f"Time: {datetime.now(timezone.utc).isoformat()}")
-    print("=" * 60)
-    if not GEMINI_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
-        print("[ERROR] Missing environment variables:")
-        if not GEMINI_API_KEY: print("  - GEMINI_API_KEY")
-        if not SUPABASE_URL:   print("  - SUPABASE_URL")
-        if not SUPABASE_KEY:   print("  - SUPABASE_KEY")
-        exit(1)
-    db = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
-    rows = db.select("entity_profile", {"ai_id": f"eq.{AI_ID}"})
-    if not rows:
-        print(f"[ERROR] Entity '{AI_ID}' not found in entity_profile.")
-        exit(1)
-    state = AEState(rows[0])
-    AEEngine(db, state).run_cycle()
-    print("\n[DONE]")
-
-if __name__ == "__main__":
-    main()
