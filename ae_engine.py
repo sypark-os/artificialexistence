@@ -422,7 +422,7 @@ def create_github_pr(self, proposal, new_source):
             print(f"  [GITHUB ERROR] {err_msg}")
             return False, err_msg
 
-    def _log_mod(self, proposal, approved, applied, msg):
+def _log_mod(self, proposal, approved, applied, msg):
         try: self.db.insert("self_modification_log", {"ai_id": self.state.ai_id, "goal_gap": json.dumps({}),
             "proposal": json.dumps(proposal), "approved": approved, "applied": applied, "result_msg": msg})
         except Exception: pass
