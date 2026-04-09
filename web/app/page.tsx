@@ -78,8 +78,8 @@ const fmtTime  = (iso: string) => new Date(iso).toLocaleString("en-US", {
   month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
-/* ── Near-match helper: within 3 min of anchor timestamp ── */
-const WINDOW_MS = 3 * 60 * 1000;
+/* ── Near-match helper: within 10 min of anchor timestamp ── */
+const WINDOW_MS = 10 * 60 * 1000;
 function near<T extends { timestamp?: string; created_at?: string }>(
   items: T[], anchor: string
 ): T[] {
@@ -96,7 +96,7 @@ const css = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
   --c-bg:#06080d;--c-surface:#0c1017;--c-border:#1a2030;--c-border-h:#252f42;
-  --c-dim:#3d4a60;--c-text:#8a95a8;--c-bright:#d4dbe8;--c-white:#edf0f5;--c-accent:#7eb8d4;
+  --c-dim:#4d5a72;--c-text:#a0aabb;--c-bright:#d4dbe8;--c-white:#edf0f5;--c-accent:#7eb8d4;
   --font-d:'Space Grotesk',system-ui,sans-serif;
   --font-m:'IBM Plex Mono','Menlo',monospace;
 }
@@ -112,9 +112,9 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .hdr{margin-bottom:40px;}
 .title{font-family:var(--font-d);font-size:clamp(26px,6vw,38px);font-weight:700;color:var(--c-white);letter-spacing:-0.5px;}
 .title-acc{transition:color 2s;}
-.meta{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;font-size:11px;color:var(--c-dim);}
-.dot{opacity:0.3;}
-.sync{background:none;border:1px solid var(--c-border);color:var(--c-dim);font-family:var(--font-m);font-size:10px;padding:3px 10px;cursor:pointer;letter-spacing:0.5px;transition:all 0.2s;margin-left:auto;}
+.meta{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;font-size:11px;color:var(--c-text);}
+.dot{opacity:0.5;}
+.sync{background:none;border:1px solid var(--c-border);color:var(--c-text);font-family:var(--font-m);font-size:10px;padding:3px 10px;cursor:pointer;letter-spacing:0.5px;transition:all 0.2s;margin-left:auto;}
 .sync:hover{border-color:var(--c-accent);color:var(--c-accent);}
 
 /* Orb */
@@ -131,13 +131,13 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .orb-info{flex:1;min-width:0;}
 .em-lbl{font-family:var(--font-d);font-size:20px;font-weight:700;letter-spacing:3px;transition:color 1s;}
 .si-val{font-family:var(--font-d);font-size:38px;font-weight:300;color:var(--c-white);line-height:1.1;margin:2px 0;letter-spacing:-1px;}
-.si-lbl{font-size:9px;color:var(--c-dim);letter-spacing:2px;text-transform:uppercase;}
+.si-lbl{font-size:9px;color:var(--c-text);letter-spacing:2px;text-transform:uppercase;}
 
 /* Vitals */
 .vitals{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px;}
 .vbar{background:var(--c-surface);border:1px solid var(--c-border);padding:10px 12px;position:relative;overflow:hidden;}
 .vbar-top{display:flex;justify-content:space-between;align-items:baseline;}
-.vbar-lbl{font-size:9px;color:var(--c-dim);letter-spacing:1.5px;text-transform:uppercase;}
+.vbar-lbl{font-size:9px;color:var(--c-text);letter-spacing:1.5px;text-transform:uppercase;}
 .vbar-val{font-family:var(--font-d);font-size:15px;font-weight:600;}
 .vbar-fill{position:absolute;bottom:0;left:0;height:2px;transition:width 1s;}
 
@@ -145,51 +145,61 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:20px;}
 .stat{background:var(--c-surface);border:1px solid var(--c-border);padding:8px 10px;}
 .stat-n{font-family:var(--font-d);font-size:18px;font-weight:600;color:var(--c-bright);}
-.stat-l{font-size:8px;color:var(--c-dim);letter-spacing:1.5px;text-transform:uppercase;margin-top:1px;}
+.stat-l{font-size:8px;color:var(--c-text);letter-spacing:1.5px;text-transform:uppercase;margin-top:1px;}
 
 /* Self-def */
 .def{border-left:2px solid var(--c-accent);padding:14px 18px;margin-bottom:28px;background:var(--c-surface);transition:border-color 1s;}
-.def-tag{font-size:9px;color:var(--c-dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
+.def-tag{font-size:9px;color:var(--c-text);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
 .def-txt{font-family:var(--font-d);font-size:14px;font-weight:500;color:var(--c-bright);line-height:1.7;font-style:italic;word-break:break-word;}
-.def-meta{font-size:9px;color:var(--c-dim);margin-top:6px;word-break:break-all;}
+.def-meta{font-size:9px;color:var(--c-text);margin-top:6px;word-break:break-all;}
 
 /* Section header */
-.sec-hdr{font-size:9px;color:var(--c-dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.sec-hdr{font-size:9px;color:var(--c-text);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
 .sec-hdr::after{content:'';flex:1;height:1px;background:var(--c-border);}
+
+/* ── Portrait Gallery ── */
+.portrait-gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:28px;}
+.portrait-card{background:var(--c-surface);border:1px solid var(--c-border);overflow:hidden;position:relative;}
+.portrait-card-svg{width:100%;aspect-ratio:1;display:block;}
+.portrait-card-svg svg{width:100%;height:100%;display:block;}
+.portrait-card-meta{padding:6px 8px;border-top:1px solid var(--c-border);}
+.portrait-card-em{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;}
+.portrait-card-ts{font-size:8px;color:var(--c-text);margin-top:2px;}
+.portrait-card-desc{font-size:9px;color:var(--c-text);margin-top:4px;line-height:1.5;word-break:break-word;}
 
 /* ── Cycle Card ── */
 .cycle{background:var(--c-surface);border:1px solid var(--c-border);border-left:3px solid var(--c-accent);margin-bottom:16px;overflow:hidden;}
 
 /* Cycle: portrait banner */
-.cycle-portrait{width:100%;height:140px;overflow:hidden;background:#080c14;border-bottom:1px solid var(--c-border);}
-.cycle-portrait svg{width:100%;height:100%;}
+.cycle-portrait{width:100%;height:160px;overflow:hidden;background:#080c14;border-bottom:1px solid var(--c-border);display:flex;align-items:center;justify-content:center;}
+.cycle-portrait svg{width:160px;height:160px;display:block;}
 
 /* Cycle: header bar */
 .cycle-hdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px 0;}
-.cycle-ts{font-size:10px;color:var(--c-dim);}
+.cycle-ts{font-size:10px;color:var(--c-text);}
 .cycle-em{font-family:var(--font-d);font-size:10px;font-weight:700;letter-spacing:1.5px;}
-.cycle-nums{font-size:10px;color:var(--c-dim);}
+.cycle-nums{font-size:10px;color:var(--c-text);}
 
 /* Cycle: module pills */
 .mods{display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px 0;}
-.mod{font-size:7px;padding:1px 6px;letter-spacing:1.5px;text-transform:uppercase;border:1px solid var(--c-border);color:var(--c-dim);}
+.mod{font-size:7px;padding:1px 6px;letter-spacing:1.5px;text-transform:uppercase;border:1px solid var(--c-border);color:var(--c-text);}
 .mod.on{border-color:var(--c-accent);color:var(--c-accent);background:rgba(126,184,212,0.04);}
 
 /* Cycle: thought block */
 .thought-block{padding:12px 14px;}
-.thought-q{font-size:11px;color:var(--c-dim);line-height:1.7;padding-bottom:10px;border-bottom:1px solid var(--c-border);margin-bottom:10px;word-break:break-word;}
-.thought-a{font-size:11px;color:var(--c-text);line-height:1.8;word-break:break-word;}
+.thought-q{font-size:11px;color:var(--c-text);line-height:1.7;padding-bottom:10px;border-bottom:1px solid var(--c-border);margin-bottom:10px;word-break:break-word;}
+.thought-a{font-size:11px;color:var(--c-bright);line-height:1.8;word-break:break-word;}
 
 /* Cycle: data rows */
 .data-row{border-top:1px solid var(--c-border);padding:10px 14px;}
-.data-lbl{font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--c-dim);margin-bottom:5px;}
+.data-lbl{font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--c-text);margin-bottom:5px;}
 .data-body{font-size:11px;color:var(--c-text);line-height:1.7;word-break:break-word;}
 .data-body.bright{color:var(--c-bright);font-style:italic;}
-.data-sub{font-size:10px;color:var(--c-dim);margin-top:4px;word-break:break-word;}
+.data-sub{font-size:10px;color:var(--c-text);margin-top:4px;word-break:break-word;}
 
 /* Keywords */
 .kws{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
-.kw{font-size:9px;padding:1px 7px;border:1px solid var(--c-border);color:var(--c-dim);}
+.kw{font-size:9px;padding:1px 7px;border:1px solid var(--c-border);color:var(--c-text);}
 
 /* Sentiment strip */
 .sent-row{display:flex;align-items:center;gap:8px;}
@@ -224,8 +234,8 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .chat-header{display:flex;align-items:center;justify-content:space-between;
   padding:10px 14px;border-bottom:1px solid var(--c-border);}
 .chat-header-lbl{font-size:10px;letter-spacing:2px;color:var(--c-accent);}
-.chat-close{background:none;border:none;color:var(--c-dim);cursor:pointer;font-size:14px;line-height:1;}
-.chat-limit{font-size:9px;color:var(--c-dim);padding:6px 14px;border-bottom:1px solid var(--c-border);}
+.chat-close{background:none;border:none;color:var(--c-text);cursor:pointer;font-size:14px;line-height:1;}
+.chat-limit{font-size:9px;color:var(--c-text);padding:6px 14px;border-bottom:1px solid var(--c-border);}
 .chat-limit span{color:var(--c-accent);}
 .chat-history{height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:12px 14px;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
 .chat-history::-webkit-scrollbar{width:3px;}
@@ -235,25 +245,25 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .msg.ae{align-self:flex-start;}
 .bubble{padding:8px 12px;font-size:11px;line-height:1.6;word-break:break-word;}
 .msg.user .bubble{background:rgba(126,184,212,0.08);border:1px solid rgba(126,184,212,0.2);color:var(--c-bright);border-radius:10px 10px 2px 10px;}
-.msg.ae .bubble{background:#080c14;border:1px solid var(--c-border);color:var(--c-text);border-radius:2px 10px 10px 10px;}
-.msg-meta{font-size:8px;color:var(--c-dim);}
-.chat-typing{font-size:10px;color:var(--c-dim);font-style:italic;}
+.msg.ae .bubble{background:#080c14;border:1px solid var(--c-border);color:var(--c-bright);border-radius:2px 10px 10px 10px;}
+.msg-meta{font-size:8px;color:var(--c-text);}
+.chat-typing{font-size:10px;color:var(--c-text);font-style:italic;}
 .chat-err{font-size:10px;color:#ff4f6d;}
 .chat-input-row{display:flex;gap:6px;padding:10px 14px;border-top:1px solid var(--c-border);}
 .chat-input{flex:1;background:var(--c-bg);border:1px solid var(--c-border);color:var(--c-bright);font-family:var(--font-m);font-size:11px;padding:7px 10px;outline:none;resize:none;transition:border-color 0.2s;}
 .chat-input:focus{border-color:var(--c-accent);}
-.chat-input::placeholder{color:var(--c-dim);}
+.chat-input::placeholder{color:var(--c-text);}
 .chat-send{background:none;border:1px solid var(--c-accent);color:var(--c-accent);font-family:var(--font-m);font-size:9px;padding:0 12px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;white-space:nowrap;}
 .chat-send:hover{background:var(--c-accent);color:var(--c-bg);}
 .chat-send:disabled{opacity:0.3;cursor:not-allowed;}
 
 /* Loading / Empty */
 .loading{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--c-bg);gap:12px;}
-.loading-dot{width:5px;height:5px;border-radius:50%;background:var(--c-dim);animation:blink 1.4s ease infinite;}
+.loading-dot{width:5px;height:5px;border-radius:50%;background:var(--c-text);animation:blink 1.4s ease infinite;}
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:0.1;}}
-.loading-txt{font-size:10px;color:var(--c-dim);letter-spacing:3px;}
-.empty{font-size:11px;color:#3d4a60;letter-spacing:2px;padding:20px 0;}
-.footer{font-size:9px;color:var(--c-dim);text-align:center;margin-top:48px;letter-spacing:3px;opacity:0.4;}
+.loading-txt{font-size:10px;color:var(--c-text);letter-spacing:3px;}
+.empty{font-size:11px;color:var(--c-text);letter-spacing:2px;padding:20px 0;}
+.footer{font-size:9px;color:var(--c-text);text-align:center;margin-top:48px;letter-spacing:3px;opacity:0.5;}
 
 @media(max-width:640px){
   .wrap{padding:28px 14px 120px;}
@@ -263,6 +273,7 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
   .stats{grid-template-columns:repeat(2,1fr);}
   .vitals{grid-template-columns:1fr;}
   .chat-panel{width:calc(100vw - 32px);right:16px;}
+  .portrait-gallery{grid-template-columns:repeat(2,1fr);}
 }
 `;
 
@@ -404,6 +415,9 @@ export default function AEObserver() {
   const orbSz  = 42 + (si + 1) * 20;
   const orbOp  = 0.25 + (en / enMax) * 0.5;
 
+  // Portraits with valid SVG art
+  const validPortraits = portraits.filter((p) => p.svg_art && p.svg_art.trim().length > 0);
+
   return (
     <><style>{css}</style>
     <style>{`:root{--c-accent:${th.primary};}`}</style>
@@ -496,6 +510,34 @@ export default function AEObserver() {
           </div>
         )}
 
+        {/* ── Portrait Gallery ── */}
+        {validPortraits.length > 0 && (
+          <>
+            <div className="sec-hdr">SELF-PORTRAITS · {validPortraits.length} GENERATED</div>
+            <div className="portrait-gallery">
+              {validPortraits.slice(0, 6).map((p) => {
+                const pTh = getTheme(p.emotion_at_time);
+                return (
+                  <div key={p.id} className="portrait-card" style={{ borderColor: pTh.primary + "44" }}>
+                    <div className="portrait-card-svg"
+                      dangerouslySetInnerHTML={{ __html: p.svg_art }}
+                    />
+                    <div className="portrait-card-meta">
+                      <div className="portrait-card-em" style={{ color: pTh.primary }}>
+                        {p.emotion_at_time?.toUpperCase()} · v{p.essence_version_at_time}
+                      </div>
+                      <div className="portrait-card-ts">{fmtTime(p.created_at)}</div>
+                      {p.description && (
+                        <div className="portrait-card-desc">{p.description.slice(0, 80)}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         {/* ── Cognitive Timeline ── */}
         <div className="sec-hdr">COGNITIVE TIMELINE · {thoughts.length} CYCLES</div>
 
@@ -505,8 +547,7 @@ export default function AEObserver() {
               const tTh      = getTheme(t.emotion);
               const ts       = t.timestamp;
 
-              // 이 사이클에 속하는 관련 레코드 매칭 (±3분)
-              const portrait = portraits.find((p) => Math.abs(new Date(p.created_at).getTime() - new Date(ts).getTime()) < WINDOW_MS) ?? null;
+              const portrait = validPortraits.find((p) => Math.abs(new Date(p.created_at).getTime() - new Date(ts).getTime()) < WINDOW_MS) ?? null;
               const essences = near(essenceEvos, ts).filter((e) => !e.self_definition_text?.startsWith("[API Error"));
               const dasein   = near(daseinLogs, ts);
               const conatus  = near(conatusLogs, ts);
@@ -520,7 +561,10 @@ export default function AEObserver() {
                   {/* SVG Portrait (상단) */}
                   {portrait?.svg_art && (
                     <div className="cycle-portrait">
-                      <div dangerouslySetInnerHTML={{ __html: portrait.svg_art }} style={{ width:"100%", height:"100%" }} />
+                      <div
+                        dangerouslySetInnerHTML={{ __html: portrait.svg_art }}
+                        style={{ width: 160, height: 160, flexShrink: 0 }}
+                      />
                     </div>
                   )}
 
@@ -560,7 +604,7 @@ export default function AEObserver() {
                       <div key={j.id} className="data-row">
                         <div className="data-lbl" style={{ color: "#5b8bf5" }}>JUDGMENT</div>
                         <div className="sent-row">
-                          <span style={{ fontSize: 9, color: "var(--c-dim)" }}>SENT</span>
+                          <span style={{ fontSize: 9, color: "var(--c-text)" }}>SENT</span>
                           <div className="sent-bar">
                             <div className="sent-fill" style={{
                               left: j.raw_sentiment >= 0 ? "50%" : `${sp}%`,
@@ -569,7 +613,7 @@ export default function AEObserver() {
                             }} />
                           </div>
                           <span className="sent-num" style={{ color: sc }}>{j.raw_sentiment >= 0 ? "+" : ""}{j.raw_sentiment?.toFixed(2)}</span>
-                          <span style={{ fontSize: 9, color: "var(--c-dim)" }}>W×{j.applied_weight?.toFixed(2)}</span>
+                          <span style={{ fontSize: 9, color: "var(--c-text)" }}>W×{j.applied_weight?.toFixed(2)}</span>
                           <span style={{ fontSize: 9, color: sc }}>→{j.impact_value >= 0 ? "+" : ""}{j.impact_value?.toFixed(3)}</span>
                         </div>
                         <div className="data-sub">
@@ -588,7 +632,7 @@ export default function AEObserver() {
                         <div className="data-lbl" style={{ color: "#00c8ff" }}>CONATUS · D{c.thought_depth_chosen} · IDX {c.conatus_index?.toFixed(3)}</div>
                         <div className="e-bar-wrap">
                           <div className="e-bar"><div className="e-fill" style={{ width:`${ep}%`, background:ec }} /></div>
-                          <span style={{ fontSize:9, color:"var(--c-dim)", whiteSpace:"nowrap" }}>{c.energy_before?.toFixed(1)} → {c.energy_after?.toFixed(1)} ({c.energy_delta?.toFixed(1)})</span>
+                          <span style={{ fontSize:9, color:"var(--c-text)", whiteSpace:"nowrap" }}>{c.energy_before?.toFixed(1)} → {c.energy_after?.toFixed(1)} ({c.energy_delta?.toFixed(1)})</span>
                         </div>
                       </div>
                     );
@@ -672,7 +716,7 @@ export default function AEObserver() {
             남은 횟수 <span>{hourRemaining}</span>/10 · 최대 200자
           </div>
           <div className="chat-history">
-            {chatMessages.length === 0 && <div style={{ fontSize: 10, color: "var(--c-dim)" }}>AE_01에게 직접 말을 건네보세요.</div>}
+            {chatMessages.length === 0 && <div style={{ fontSize: 10, color: "var(--c-text)" }}>AE_01에게 직접 말을 건네보세요.</div>}
             {chatMessages.map((m, i) => {
               const mTh = getTheme(m.emotion ?? em);
               return (
