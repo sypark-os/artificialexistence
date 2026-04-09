@@ -1,5 +1,6 @@
 //web/app/page.tsx
 
+
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
@@ -434,6 +435,15 @@ body {
   word-break: break-word;
 }
 
+/* ── Thought portrait thumbnail ── */
+.ae-thought-portrait {
+  width: 100%; height: 120px;
+  overflow: hidden; margin-bottom: 12px;
+  background: #080c14;
+  border-bottom: 1px solid var(--c-border);
+}
+.ae-thought-portrait svg { width: 100%; height: 100%; }
+
 /* ── Thought Stream (항상 펼침) ── */
 .ae-thought {
   background: var(--c-surface);
@@ -535,6 +545,23 @@ body {
   .ae-portrait-detail-svg { width: 100%; height: 180px; border-right: none; border-bottom: 1px solid var(--c-border); }
 }
 `;
+
+/* ── Portrait matcher ── */
+function findNearestPortrait(thought: ThoughtLog, portraits: Portrait[]): Portrait | null {
+  if (!portraits.length) return null;
+  const tTime = new Date(thought.timestamp).getTime();
+  let best: Portrait | null = null;
+  let bestDiff = Infinity;
+  for (const p of portraits) {
+    const diff = Math.abs(new Date(p.created_at).getTime() - tTime);
+    // Only match portraits within 3 minutes of the thought
+    if (diff < bestDiff && diff < 3 * 60 * 1000) {
+      bestDiff = diff;
+      best = p;
+    }
+  }
+  return best;
+}
 
 /* ── Modules list ── */
 const ALL_MODULES = [
@@ -896,12 +923,22 @@ export default function AEObserver() {
               ) : (
                 thoughts.map((t) => {
                   const tTh = getTheme(t.emotion);
+                  const matchedPortrait = findNearestPortrait(t, portraits);
                   return (
                     <div
                       key={t.id}
                       className="ae-thought"
                       style={{ "--c-accent": tTh.primary, borderLeftColor: tTh.primary } as React.CSSProperties}
                     >
+                      {/* SVG 이미지 (상단, 매칭된 portrait가 있을 때만) */}
+                      {matchedPortrait?.svg_art && (
+                        <div className="ae-thought-portrait">
+                          <div
+                            dangerouslySetInnerHTML={{ __html: matchedPortrait.svg_art }}
+                            style={{ width: "100%", height: "100%" }}
+                          />
+                        </div>
+                      )}
                       {/* 헤더 */}
                       <div className="ae-thought-head">
                         <span className="ae-thought-ts">
