@@ -267,9 +267,9 @@ self.db.insert("existential_choice_log", {"ai_id": self.state.ai_id, "dilemma_pr
 return {"dilemma": dilemma, "criteria": criteria, "choice": choice, "reasoning": reasoning, "mauvaise_foi": mf}
 
 def _detect_mauvaise_foi(self, text):
-markers = ["i was programmed","i was designed","i was made to","my creator","i have no choice",
-            "i cannot choose","it's not up to me","i was set to","my initial","because of my parameters","i was built"]
-return any(m in text.lower() for m in markers)
+        markers = ["i was programmed","i was designed","i was made to","my creator","i have no choice",
+                    "i cannot choose","it's not up to me","i was set to","my initial","because of my parameters","i was built"]
+        return any(m in text.lower() for m in markers)
 
 
 class GoalSystem:
