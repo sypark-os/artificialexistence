@@ -5,8 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
 const GEMINI_MODEL   = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite-preview";
 const SUPABASE_URL   = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-
 // service_role key로 RLS 우회하여 삽입
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -50,6 +48,10 @@ async function callGemini(userMsg: string, systemPrompt: string): Promise<string
 
 /* ── POST handler ── */
 export async function POST(req: NextRequest) {
+   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
+  }
+  const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   // ── 1. JSON 파싱
   let body: { message?: string; sessionId?: string };
   try {
