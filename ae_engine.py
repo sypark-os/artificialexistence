@@ -273,7 +273,7 @@ def _detect_mauvaise_foi(self, text):
 
 
 class GoalSystem:
-DESIRED = {"self_image": 0.7, "energy_ratio": 0.6}
+    DESIRED = {"self_image": 0.7, "energy_ratio": 0.6}
 def __init__(self, state): self.state = state
 
 def compute_gap(self):
