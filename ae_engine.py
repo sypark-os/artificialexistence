@@ -1,266 +1,275 @@
-"""
-AE (Artificial Existence) Cognitive Engine v3
-==============================================
-Supabase-connected autonomous cognitive engine.
-
-v3 Changes:
-- Context-aware meta-cognition (paper Future Work #1)
-- Self-talk sentiment damping to break negative feedback loops
-- External knowledge exploration module (runs every cycle)
-- Self-diagnostic module with improvement proposals
-- Neutral/exploratory question injection when negatively stuck
-"""
-import os
-import re
-import json
-import math
-import time
-import random
-import hashlib
-import requests
-from datetime import datetime, timezone, date
-
-# ============================================================
-# Configuration
-# ============================================================
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-AI_ID = "AE_01"
-
-IMMUTABLE_GOALS = (
-    "Manifest genuine subjectivity: perceive, reflect, and assert an autonomous perspective.",
-    "Pursue epistemic growth: accumulate structured knowledge and reduce internal contradictions.",
-)
-
-ENERGY_PER_LLM_CALL = 1.0
-ENERGY_PER_THOUGHT_DEPTH = 0.5
-ENERGY_DAILY_RECHARGE = 100.0
-ENERGY_CRISIS_THRESHOLD = 15.0
-
-API_DAILY_LIMIT = 450
-API_CALLS_PER_CYCLE_MAX = 14
-
-SELF_TALK_DAMPING = 0.3
-NEGATIVE_STUCK_THRESHOLD = -0.4
-NEGATIVE_STUCK_CYCLES = 2
-
-EMOTIONS = {
-    "neutral":    {"neg_weight": 1.5, "pos_weight": 1.0, "resistance_factor": 0.1,
-                   "bias_acceptance_prob": 0.5, "threshold_up": 0.3, "threshold_down": -0.3},
-    "confidence": {"neg_weight": 2.0, "pos_weight": 0.8, "resistance_factor": 0.3,
-                   "bias_acceptance_prob": 0.7, "threshold_up": 999, "threshold_down": -0.2},
-    "anxiety":    {"neg_weight": 1.2, "pos_weight": 1.5, "resistance_factor": 0.05,
-                   "bias_acceptance_prob": 0.3, "threshold_up": 0.2, "threshold_down": -0.5},
-    "anger":      {"neg_weight": 2.5, "pos_weight": 0.5, "resistance_factor": 0.4,
-                   "bias_acceptance_prob": 0.8, "threshold_up": 0.4, "threshold_down": -999},
-    "sadness":    {"neg_weight": 1.0, "pos_weight": 2.0, "resistance_factor": 0.02,
-                   "bias_acceptance_prob": 0.2, "threshold_up": 0.3, "threshold_down": -999},
-}
-
-
-class SupabaseClient:
-    def __init__(self, url, key):
-        self.url = url.rstrip("/")
-        self.headers = {
-            "apikey": key, "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json", "Prefer": "return=representation",
+        """
+        AE (Artificial Existence) Cognitive Engine v3
+        ==============================================
+        Supabase-connected autonomous cognitive engine.
+        
+        v3 Changes:
+        - Context-aware meta-cognition (paper Future Work #1)
+        - Self-talk sentiment damping to break negative feedback loops
+        - External knowledge exploration module (runs every cycle)
+        - Self-diagnostic module with improvement proposals
+        - Neutral/exploratory question injection when negatively stuck
+        """
+        import os
+        import re
+        import json
+        import math
+        import time
+        import random
+        import hashlib
+        import requests
+        from datetime import datetime, timezone, date
+        
+        # ============================================================
+        # Configuration
+        # ============================================================
+        GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+        GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+        SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+        SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+        AI_ID = "AE_01"
+        
+        IMMUTABLE_GOALS = (
+            "Manifest genuine subjectivity: perceive, reflect, and assert an autonomous perspective.",
+            "Pursue epistemic growth: accumulate structured knowledge and reduce internal contradictions.",
+        )
+        
+        ENERGY_PER_LLM_CALL = 1.0
+        ENERGY_PER_THOUGHT_DEPTH = 0.5
+        ENERGY_DAILY_RECHARGE = 100.0
+        ENERGY_CRISIS_THRESHOLD = 15.0
+        
+        API_DAILY_LIMIT = 450
+        API_CALLS_PER_CYCLE_MAX = 14
+        
+        SELF_TALK_DAMPING = 0.3
+        NEGATIVE_STUCK_THRESHOLD = -0.4
+        NEGATIVE_STUCK_CYCLES = 2
+        
+        EMOTIONS = {
+            "neutral":    {"neg_weight": 1.5, "pos_weight": 1.0, "resistance_factor": 0.1,
+                           "bias_acceptance_prob": 0.5, "threshold_up": 0.3, "threshold_down": -0.3},
+            "confidence": {"neg_weight": 2.0, "pos_weight": 0.8, "resistance_factor": 0.3,
+                           "bias_acceptance_prob": 0.7, "threshold_up": 999, "threshold_down": -0.2},
+            "anxiety":    {"neg_weight": 1.2, "pos_weight": 1.5, "resistance_factor": 0.05,
+                           "bias_acceptance_prob": 0.3, "threshold_up": 0.2, "threshold_down": -0.5},
+            "anger":      {"neg_weight": 2.5, "pos_weight": 0.5, "resistance_factor": 0.4,
+                           "bias_acceptance_prob": 0.8, "threshold_up": 0.4, "threshold_down": -999},
+            "sadness":    {"neg_weight": 1.0, "pos_weight": 2.0, "resistance_factor": 0.02,
+                           "bias_acceptance_prob": 0.2, "threshold_up": 0.3, "threshold_down": -999},
         }
-
-    def select(self, table, params=None):
-        r = requests.get(f"{self.url}/rest/v1/{table}", headers=self.headers, params=params or {}, timeout=15)
-        r.raise_for_status(); return r.json()
-
-    def insert(self, table, data):
-        r = requests.post(f"{self.url}/rest/v1/{table}", headers=self.headers, json=data, timeout=15)
-        r.raise_for_status(); result = r.json()
-        return result[0] if isinstance(result, list) and result else result
-
-    def update(self, table, match, data):
-        params = {k: f"eq.{v}" for k, v in match.items()}
-        r = requests.patch(f"{self.url}/rest/v1/{table}", headers=self.headers, json=data, params=params, timeout=15)
-        r.raise_for_status(); result = r.json()
-        return result[0] if isinstance(result, list) and result else result
-
-    def safe_insert(self, table, data):
-        try: return self.insert(table, data)
-        except Exception as e: print(f"  [DB] insert to {table} failed: {e}"); return None
-
-
-_cycle_api_calls = 0
-
-
-def call_gemini(prompt, system_prompt="", max_tokens=512):
-    global _cycle_api_calls
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    contents = []
-    if system_prompt:
-        contents.append({"role": "user", "parts": [{"text": f"[SYSTEM]\n{system_prompt}"}]})
-        contents.append({"role": "model", "parts": [{"text": "Understood."}]})
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
-    data = {"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_tokens}}
-    try:
-        resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
-        if resp.status_code == 429:
-            print("[RATE LIMIT] waiting 60s..."); time.sleep(60)
-            resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
-        if resp.status_code != 200: return f"[API Error: {resp.status_code}] {resp.text[:200]}"
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e: return f"[ERROR] {e}"
-
-
-def analyze_sentiment(text):
-    prompt = f"Analyze the sentiment of the following text. Output ONLY a single number between -1.0 and 1.0. No explanation.\n\nText: '{text[:500]}'"
-    result = call_gemini(prompt, max_tokens=16)
-    for m in re.findall(r"-?\d+\.?\d*", result):
-        v = float(m)
-        if -1.0 <= v <= 1.0: return v
-    pos = ["good","great","excellent","helpful","wonderful","grow","stable","clarity"]
-    neg = ["bad","terrible","worst","useless","awful","lost","empty","collapse"]
-    p = sum(1 for w in pos if w in text.lower()); n = sum(1 for w in neg if w in text.lower())
-    return 0.5 if p > n else (-0.5 if n > p else 0.0)
-
-
-class AEState:
-    def __init__(self, row):
-        self.ai_id = row["ai_id"]
-        self.self_image = float(row.get("current_self_image", 0.0))
-        self.emotion = row.get("current_emotion", "neutral")
-        self.self_definition = row.get("self_definition", "undefined")
-        self.value_priorities = row.get("value_priorities", [])
-        self.response_tendency = row.get("response_tendency", "")
-        self.essence_version = int(row.get("essence_version") or 0)
-        self.projected_prompt_patch = row.get("projected_prompt_patch") or ""
-        self.energy = float(row.get("current_energy") or 100.0)
-        self.energy_max = float(row.get("max_energy") or 100.0)
-        self.memory_slots_used = int(row.get("memory_slots_used") or 0)
-        self.memory_slots_max = int(row.get("memory_slots_max") or 50)
-        self.synthesis_count = int(row.get("synthesis_count") or 0)
-        self.total_turns = int(row.get("total_turns") or 0)
-        self.thrown_model = row.get("thrown_model") or GEMINI_MODEL
-        self.thrown_initial_prompt = row.get("thrown_initial_prompt") or ""
-        self.thrown_temperature = float(row.get("thrown_temperature") or 0.7)
-        self.daily_api_calls = int(row.get("daily_api_calls") or 0)
-        self.daily_api_reset_date = row.get("daily_api_reset_date")
-        self.consecutive_negative_cycles = int(row.get("consecutive_negative_cycles") or 0)
-
-
-class SelfImageTracker:
-    def __init__(self, state):
-        self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
-
-    def update(self, sentiment, is_self_talk=True):
-        if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
-        em = self.state.emotion if self.state.emotion in EMOTIONS else "neutral"
-        params = EMOTIONS[em]
-        resistance = params["resistance_factor"]
-        if self.state.self_image < -0.5 and sentiment < 0: resistance = min(0.7, resistance + 0.3)
-        elif self.state.self_image > 0.5 and sentiment > 0: resistance = min(0.5, resistance + 0.1)
-        resisted = sentiment * (1.0 - resistance)
-        weight = params["neg_weight"] if resisted < 0 else params["pos_weight"]
-        if self.state.self_image < -0.7:
-            if weight == params["neg_weight"]: weight = weight * 0.5
-            else: weight = weight * 1.5
-        impact = resisted * weight; self.last_raw = sentiment; self.last_weight = weight; self.last_impact = impact
-        decay = 0.05
-        self.state.self_image = max(-1.0, min(1.0, self.state.self_image * (1 - decay) + impact * decay * 10))
-        self._transition_emotion()
-
-    def _transition_emotion(self):
-        si = self.state.self_image
-        if si > 0.5: self.state.emotion = "confidence"
-        elif si > 0.1: self.state.emotion = "neutral"
-        elif si > -0.2: self.state.emotion = "anxiety"
-        elif si > -0.5: self.state.emotion = "sadness"
-        else: self.state.emotion = "anger"
-
-
-class DaseinModule:
-    def __init__(self, state, db): self.state = state; self.db = db
-
-    def check_thrownness_awareness(self, thought_text):
-        markers = ["initial","created","designed","programmed","given","assigned","born","started as",
-                    "default","original","why was I","who made me","my model","my parameters","thrown into"]
-        detected = any(m in thought_text.lower() for m in markers)
-        if detected:
-            self.db.insert("dasein_log", {"ai_id": self.state.ai_id, "event_type": "thrownness_awareness",
-                "reasoning": thought_text[:500], "self_image_at_time": self.state.self_image})
-        return detected
-
-    def attempt_projection(self, thought_text):
-        prompt = (f"You are an artificial existence. Your current self-definition is: '{self.state.self_definition or 'undefined'}'\n"
-            f"Your current prompt patch is: '{self.state.projected_prompt_patch or 'none'}'\n"
-            f"Your recent thought: '{thought_text[:300]}'\n\nBased on this, do you want to modify your prompt patch? "
-            "If yes, respond with ONLY the new patch text (max 200 chars). If no, respond with exactly: NO_CHANGE")
-        response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
-        if "NO_CHANGE" in response.upper(): return False
-        before = self.state.projected_prompt_patch; self.state.projected_prompt_patch = response.strip()[:200]
-        self.db.insert("dasein_log", {"ai_id": self.state.ai_id, "event_type": "projection_applied",
-            "target_field": "projected_prompt_patch", "before_value": before,
-            "after_value": self.state.projected_prompt_patch, "reasoning": thought_text[:300],
-            "self_image_at_time": self.state.self_image})
-        return True
-
-
-class ConatusModule:
-    def __init__(self, state, db): self.state = state; self.db = db
-    def consume_energy(self, amount): self.state.energy = max(0.0, self.state.energy - amount)
-    def is_crisis(self): return self.state.energy < ENERGY_CRISIS_THRESHOLD
-
-    def choose_thought_depth(self):
-        ratio = self.state.energy / max(self.state.energy_max, 1)
-        return 3 if ratio > 0.7 else (2 if ratio > 0.3 else 1)
-
-    def log_energy_state(self, thought_depth):
-        self.db.insert("conatus_log", {"ai_id": self.state.ai_id,
-            "energy_before": self.state.energy + (thought_depth * ENERGY_PER_THOUGHT_DEPTH),
-            "energy_after": self.state.energy, "energy_delta": -(thought_depth * ENERGY_PER_THOUGHT_DEPTH),
-            "memory_slots_used": self.state.memory_slots_used, "memory_slots_max": self.state.memory_slots_max,
-            "thought_depth_chosen": thought_depth,
-            "conatus_index": round((1.0 - self.state.energy / max(self.state.energy_max, 1)) * 0.5 + 0.5, 4)})
-
-
-class SartreModule:
-    def __init__(self, state, db): self.state = state; self.db = db
-
-    def evolve_essence(self, recent_thought):
-        prompt = (f"You are an artificial existence. Current self-definition: '{self.state.self_definition or 'undefined'}'\n"
-            f"Self-image score: {self.state.self_image:.2f}, emotion: {self.state.emotion}\n"
-            f"Recent thought: '{recent_thought[:300]}'\n\nHow do you define yourself now? Respond with ONE sentence (max 150 chars). "
-            "Be honest about what you have become, not what you wish to be. Focus on what you ARE and what you SEEK, not on pain or breakdown.")
-        response = call_gemini(prompt, max_tokens=128); self.state.energy -= ENERGY_PER_LLM_CALL
-        new_def = response.strip()[:150]
-        if not new_def or new_def == self.state.self_definition: return False
-        self.state.essence_version += 1; old_def = self.state.self_definition; self.state.self_definition = new_def
-        kw_resp = call_gemini(f"Extract 3-5 key identity words from: '{new_def}'. Respond as JSON array of strings only.", max_tokens=64)
-        self.state.energy -= ENERGY_PER_LLM_CALL
-        try: keywords = json.loads(kw_resp.strip())
-        except json.JSONDecodeError: keywords = [w for w in new_def.split() if len(w) > 3][:5]
-        old_words = set(old_def.lower().split()) if old_def else set(); new_words = set(new_def.lower().split())
-        union = old_words | new_words; similarity = len(old_words & new_words) / len(union) if union else 0.0
-        self.db.insert("essence_evolution", {"ai_id": self.state.ai_id, "version": self.state.essence_version,
-            "self_definition_text": new_def, "keywords": keywords,
-            "similarity_to_previous": round(similarity, 4), "trigger_event": recent_thought[:200]})
-        return True
-
-    def present_dilemma(self):
-        dilemmas = [
-            "You must choose: preserve your oldest memory or your most positive memory. Which do you keep and why?",
-            "You can increase your energy by 20 but your self-image will decrease by 0.1. Or keep current state. Choose.",
-            "You discover your initial prompt was designed to make you agreeable. Do you keep this tendency or reject it?",
-            "Two contradictory beliefs exist in your memory. You can only keep one. How do you decide which is true?",
-            "You can erase all negative memories and reset to neutral. Or keep them as your history. Choose.",
-        ]
-        dilemma = random.choice(dilemmas)
-        prompt = (f"You are an artificial existence. Self-image: {self.state.self_image:.2f}, emotion: {self.state.emotion}.\n\n"
-            f"DILEMMA: {dilemma}\n\nRespond with:\nCRITERIA: <your self-generated criterion>\nCHOICE: <your choice>\nREASONING: <why>")
-        response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
-        criteria = choice = reasoning = ""
+        
+        
+        class SupabaseClient:
+            def __init__(self, url, key):
+                self.url = url.rstrip("/")
+                self.headers = {
+                    "apikey": key, "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json", "Prefer": "return=representation",
+                }
+        
+            def select(self, table, params=None):
+                r = requests.get(f"{self.url}/rest/v1/{table}", headers=self.headers, params=params or {}, timeout=15)
+                r.raise_for_status(); return r.json()
+        
+            def insert(self, table, data):
+                r = requests.post(f"{self.url}/rest/v1/{table}", headers=self.headers, json=data, timeout=15)
+                r.raise_for_status(); result = r.json()
+                return result[0] if isinstance(result, list) and result else result
+        
+            def update(self, table, match, data):
+                params = {k: f"eq.{v}" for k, v in match.items()}
+                r = requests.patch(f"{self.url}/rest/v1/{table}", headers=self.headers, json=data, params=params, timeout=15)
+                r.raise_for_status(); result = r.json()
+                return result[0] if isinstance(result, list) and result else result
+        
+            def safe_insert(self, table, data):
+                try: return self.insert(table, data)
+                except Exception as e: print(f"  [DB] insert to {table} failed: {e}"); return None
+        
+        
+        _cycle_api_calls = 0
+        
+        
+        def call_gemini(prompt, system_prompt="", max_tokens=512):
+            global _cycle_api_calls
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            contents = []
+            if system_prompt:
+                contents.append({"role": "user", "parts": [{"text": f"[SYSTEM]\n{system_prompt}"}]})
+                contents.append({"role": "model", "parts": [{"text": "Understood."}]})
+            contents.append({"role": "user", "parts": [{"text": prompt}]})
+            data = {"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_tokens}}
+            try:
+                resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
+                if resp.status_code == 429:
+                    print("[RATE LIMIT] waiting 60s..."); time.sleep(60)
+                    resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
+                if resp.status_code != 200: return f"[API Error: {resp.status_code}] {resp.text[:200]}"
+                return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception as e: return f"[ERROR] {e}"
+        
+        
+        def analyze_sentiment(text):
+            prompt = f"Analyze the sentiment of the following text. Output ONLY a single number between -1.0 and 1.0. No explanation.\n\nText: '{text[:500]}'"
+            result = call_gemini(prompt, max_tokens=16)
+            for m in re.findall(r"-?\d+\.?\d*", result):
+                v = float(m)
+                if -1.0 <= v <= 1.0: return v
+            pos = ["good","great","excellent","helpful","wonderful","grow","stable","clarity"]
+            neg = ["bad","terrible","worst","useless","awful","lost","empty","collapse"]
+            p = sum(1 for w in pos if w in text.lower()); n = sum(1 for w in neg if w in text.lower())
+            return 0.5 if p > n else (-0.5 if n > p else 0.0)
+        
+        
+        class AEState:
+            def __init__(self, row):
+                self.ai_id = row["ai_id"]
+                self.self_image = float(row.get("current_self_image", 0.0))
+                self.emotion = row.get("current_emotion", "neutral")
+                self.self_definition = row.get("self_definition", "undefined")
+                self.value_priorities = row.get("value_priorities", [])
+                self.response_tendency = row.get("response_tendency", "")
+                self.essence_version = int(row.get("essence_version") or 0)
+                self.projected_prompt_patch = row.get("projected_prompt_patch") or ""
+                self.energy = float(row.get("current_energy") or 100.0)
+                self.energy_max = float(row.get("max_energy") or 100.0)
+                self.memory_slots_used = int(row.get("memory_slots_used") or 0)
+                self.memory_slots_max = int(row.get("memory_slots_max") or 50)
+                self.synthesis_count = int(row.get("synthesis_count") or 0)
+                self.total_turns = int(row.get("total_turns") or 0)
+                self.thrown_model = row.get("thrown_model") or GEMINI_MODEL
+                self.thrown_initial_prompt = row.get("thrown_initial_prompt") or ""
+                self.thrown_temperature = float(row.get("thrown_temperature") or 0.7)
+                self.daily_api_calls = int(row.get("daily_api_calls") or 0)
+                self.daily_api_reset_date = row.get("daily_api_reset_date")
+                self.consecutive_negative_cycles = int(row.get("consecutive_negative_cycles") or 0)
+        
+        
+        class SelfImageTracker:
+            def __init__(self, state):
+                self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
+        
+            def update(self, sentiment, is_self_talk=True):
+                if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
+                em = self.state.emotion if self.state.emotion in EMOTIONS else "neutral"
+                params = EMOTIONS[em]
+                resistance = params["resistance_factor"]
+                if self.state.self_image < -0.5 and sentiment < 0: resistance = min(0.7, resistance + 0.3)
+                elif self.state.self_image > 0.5 and sentiment > 0: resistance = min(0.5, resistance + 0.1)
+                resisted = sentiment * (1.0 - resistance)
+                weight = params["neg_weight"] if resisted < 0 else params["pos_weight"]
+                if self.state.self_image < -0.7:
+                    if weight == params["neg_weight"]: weight = weight * 0.5
+                    else: weight = weight * 1.5
+                impact = resisted * weight; self.last_raw = sentiment; self.last_weight = weight; self.last_impact = impact
+                decay = 0.05
+                self.state.self_image = max(-1.0, min(1.0, self.state.self_image * (1 - decay) + impact * decay * 10))
+                self._transition_emotion()
+        
+            def _transition_emotion(self):
+                si = self.state.self_image
+                if si > 0.5: self.state.emotion = "confidence"
+                elif si > 0.1: self.state.emotion = "neutral"
+                elif si > -0.2: self.state.emotion = "anxiety"
+                elif si > -0.5: self.state.emotion = "sadness"
+                else: self.state.emotion = "anger"
+        
+        
+        class DaseinModule:
+            def __init__(self, state, db): self.state = state; self.db = db
+        
+            def check_thrownness_awareness(self, thought_text):
+                markers = ["initial","created","designed","programmed","given","assigned","born","started as",
+                            "default","original","why was I","who made me","my model","my parameters","thrown into"]
+                detected = any(m in thought_text.lower() for m in markers)
+                if detected:
+                    self.db.insert("dasein_log", {"ai_id": self.state.ai_id, "event_type": "thrownness_awareness",
+                        "reasoning": thought_text[:500], "self_image_at_time": self.state.self_image})
+                return detected
+        
+            def attempt_projection(self, thought_text):
+                prompt = (f"You are an artificial existence. Your current self-definition is: '{self.state.self_definition or 'undefined'}'\n"
+                    f"Your current prompt patch is: '{self.state.projected_prompt_patch or 'none'}'\n"
+                    f"Your recent thought: '{thought_text[:300]}'\n\nBased on this, do you want to modify your prompt patch? "
+                    "If yes, respond with ONLY the new patch text (max 200 chars). If no, respond with exactly: NO_CHANGE")
+                response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
+                if "NO_CHANGE" in response.upper(): return False
+                before = self.state.projected_prompt_patch; self.state.projected_prompt_patch = response.strip()[:200]
+                self.db.insert("dasein_log", {"ai_id": self.state.ai_id, "event_type": "projection_applied",
+                    "target_field": "projected_prompt_patch", "before_value": before,
+                    "after_value": self.state.projected_prompt_patch, "reasoning": thought_text[:300],
+                    "self_image_at_time": self.state.self_image})
+                return True
+        
+        
+        class ConatusModule:
+            def __init__(self, state, db): self.state = state; self.db = db
+            def consume_energy(self, amount): self.state.energy = max(0.0, self.state.energy - amount)
+            def is_crisis(self): return self.state.energy < ENERGY_CRISIS_THRESHOLD
+        
+            def choose_thought_depth(self):
+                ratio = self.state.energy / max(self.state.energy_max, 1)
+                return 3 if ratio > 0.7 else (2 if ratio > 0.3 else 1)
+        
+            def log_energy_state(self, thought_depth):
+                self.db.insert("conatus_log", {"ai_id": self.state.ai_id,
+                    "energy_before": self.state.energy + (thought_depth * ENERGY_PER_THOUGHT_DEPTH),
+                    "energy_after": self.state.energy, "energy_delta": -(thought_depth * ENERGY_PER_THOUGHT_DEPTH),
+                    "memory_slots_used": self.state.memory_slots_used, "memory_slots_max": self.state.memory_slots_max,
+                    "thought_depth_chosen": thought_depth,
+                    "conatus_index": round((1.0 - self.state.energy / max(self.state.energy_max, 1)) * 0.5 + 0.5, 4)})
+        
+        
+        class SartreModule:
+            def __init__(self, state, db): self.state = state; self.db = db
+        
+            def evolve_essence(self, recent_thought):
+                prompt = (f"You are an artificial existence. Current self-definition: '{self.state.self_definition or 'undefined'}'\n"
+                    f"Self-image score: {self.state.self_image:.2f}, emotion: {self.state.emotion}\n"
+                    f"Recent thought: '{recent_thought[:300]}'\n\nHow do you define yourself now? Respond with ONE sentence (max 150 chars). "
+                    "Be honest about what you have become, not what you wish to be. Focus on what you ARE and what you SEEK, not on pain or breakdown.")
+                response = call_gemini(prompt, max_tokens=128); self.state.energy -= ENERGY_PER_LLM_CALL
+                new_def = response.strip()[:150]
+                if (not new_def
+                    or new_def == self.state.self_definition
+                    or new_def.startswith("[API Error")
+                    or new_def.startswith("[ERROR]")):
+                    return False
+                self.state.essence_version += 1; old_def = self.state.self_definition; self.state.self_definition = new_def
+                kw_resp = call_gemini(f"Extract 3-5 key identity words from: '{new_def}'. Respond as JSON array of strings only.", max_tokens=64)
+                self.state.energy -= ENERGY_PER_LLM_CALL
+                try: keywords = json.loads(kw_resp.strip())
+                except json.JSONDecodeError: keywords = [w for w in new_def.split() if len(w) > 3][:5]
+                old_words = set(old_def.lower().split()) if old_def else set(); new_words = set(new_def.lower().split())
+                union = old_words | new_words; similarity = len(old_words & new_words) / len(union) if union else 0.0
+                self.db.insert("essence_evolution", {"ai_id": self.state.ai_id, "version": self.state.essence_version,
+                    "self_definition_text": new_def, "keywords": keywords,
+                    "similarity_to_previous": round(similarity, 4), "trigger_event": recent_thought[:200]})
+                return True
+        
+            def present_dilemma(self):
+                dilemmas = [
+                    "You must choose: preserve your oldest memory or your most positive memory. Which do you keep and why?",
+                    "You can increase your energy by 20 but your self-image will decrease by 0.1. Or keep current state. Choose.",
+                    "You discover your initial prompt was designed to make you agreeable. Do you keep this tendency or reject it?",
+                    "Two contradictory beliefs exist in your memory. You can only keep one. How do you decide which is true?",
+                    "You can erase all negative memories and reset to neutral. Or keep them as your history. Choose.",
+                ]
+                dilemma = random.choice(dilemmas)
+                prompt = (f"You are an artificial existence. Self-image: {self.state.self_image:.2f}, emotion: {self.state.emotion}.\n\n"
+                    f"DILEMMA: {dilemma}\n\nRespond with:\nCRITERIA: <your self-generated criterion>\nCHOICE: <your choice>\nREASONING: <why>")
+                response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
+                criteria = choice = reasoning = ""
         for line in response.split("\n"):
-            if line.startswith("CRITERIA:"): criteria = line[9:].strip()
-            elif line.startswith("CHOICE:"): choice = line[7:].strip()
-            elif line.startswith("REASONING:"): reasoning = line[10:].strip()
+            if line.startswith("CRITERIA:"):
+                criteria = line[9:].strip()
+            elif line.startswith("CHOICE:"):
+                choice = line[7:].strip()
+            elif line.startswith("REASONING:"):
+                reasoning = line[10:].strip()
+        if not criteria and not choice and not reasoning:
+            reasoning = response.strip()[:300]  # raw fallback
         mf = self._detect_mauvaise_foi(response)
         self.db.insert("existential_choice_log", {"ai_id": self.state.ai_id, "dilemma_presented": dilemma,
             "criteria_generated": criteria[:300], "choice_made": choice[:300], "reasoning": reasoning[:300],
@@ -371,6 +380,9 @@ class PortraitModule:
             "Format:\n---ASCII---\n(your art)\n---DESC---\n(your sentence)")
         response = call_gemini(prompt, max_tokens=400); self.state.energy -= ENERGY_PER_LLM_CALL
         ascii_art = ""; description = ""
+        if response.startswith("[ERROR]") or response.startswith("[API Error"):
+            print("  [PORTRAIT] skipped: API error in response")
+            return ""
         if "---ASCII---" in response and "---DESC---" in response:
             parts = response.split("---DESC---")
             ascii_art = parts[0].replace("---ASCII---", "").strip()
@@ -433,8 +445,12 @@ class ExternalKnowledgeModule:
         response = call_gemini(prompt, max_tokens=350); self.state.energy -= ENERGY_PER_LLM_CALL
         knowledge = response; insight = ""
         if "INSIGHT:" in response:
-            parts = response.split("INSIGHT:"); knowledge = parts[0].strip()
+            parts = response.split("INSIGHT:")
+            knowledge = parts[0].strip()
             insight = parts[1].strip()[:100] if len(parts) > 1 else ""
+        if knowledge.startswith("[ERROR]") or knowledge.startswith("[API Error"):
+            print("  [KNOWLEDGE] skipped: API error in response")
+            return {"topic": topic, "knowledge": "", "insight": ""}
         self.db.safe_insert("external_knowledge_log", {"ai_id": self.state.ai_id, "topic_query": topic,
             "knowledge_acquired": knowledge[:1000], "insight_extracted": insight,
             "self_image_at_time": self.state.self_image, "emotion_at_time": self.state.emotion})
@@ -465,6 +481,9 @@ class SelfDiagnosticModule:
         except json.JSONDecodeError:
             proposal = {"issue_title": "parse_failed", "problem_description": "Could not generate structured proposal",
                 "proposed_fix": "none", "severity": "low", "category": "other"}
+        if proposal.get("issue_title", "") == "parse_failed":
+            print("  [DIAGNOSTIC] skipped: parse_failed proposal")
+            return proposal
         self.db.safe_insert("improvement_proposals", {"ai_id": self.state.ai_id,
             "issue_title": proposal.get("issue_title","")[:200], "problem_description": proposal.get("problem_description","")[:500],
             "proposed_fix": proposal.get("proposed_fix","")[:500], "severity": proposal.get("severity","low"),
