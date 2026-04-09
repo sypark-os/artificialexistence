@@ -6,6 +6,7 @@ import time
 import random
 import hashlib
 import requests
+import base64
 from datetime import datetime, timezone, date
 
 # ============================================================
@@ -328,34 +329,107 @@ class SelfModificationEngine:
             return json.loads(clean)
         except json.JSONDecodeError: return {"reason": "parse_failed", "old_code": "", "new_code": ""}
 
-    def apply_modification(self, proposal):
-        import shutil
-        old_code = proposal.get("old_code", "").strip(); new_code = proposal.get("new_code", "").strip()
+def apply_modification(self, proposal):
+        old_code = proposal.get("old_code", "").strip()
+        new_code = proposal.get("new_code", "").strip()
         reason = proposal.get("reason", "")
-        if not old_code or reason in ("none needed", "parse_failed"): return False, "no modification needed"
+        
+        if not old_code or reason in ("none needed", "parse_failed"): 
+            return False, "no modification needed"
+            
         for goal in IMMUTABLE_GOALS:
             if goal[:30] in old_code or "IMMUTABLE_GOALS" in new_code:
-                self._log_mod(proposal, False, False, "BLOCKED: immutable goal protection"); return False, "BLOCKED"
-        path = os.path.abspath(__file__); source = self.read_own_source()
-        if old_code not in source: return False, "target code not found"
+                self._log_mod(proposal, False, False, "BLOCKED: immutable goal protection")
+                return False, "BLOCKED"
+                
+        path = os.path.abspath(__file__)
+        source = self.read_own_source()
+        if old_code not in source: 
+            return False, "target code not found"
+            
         new_source = source.replace(old_code, new_code, 1)
-        try: compile(new_source, path, "exec")
-        except SyntaxError as e: return False, f"syntax error: {e}"
-        backup = path + f".bak_{int(time.time())}"
+        
+        try: 
+            compile(new_source, path, "exec")  # 치명적 문법 에러 테스트
+        except SyntaxError as e: 
+            return False, f"syntax error: {e}"
+
+        # 파일 덮어쓰기 대신 GitHub PR 생성 호출
+        success, msg = self.create_github_pr(proposal, new_source)
+        
+        if success:
+            self._cache = new_source  # 메모리 상의 캐시만 일단 업데이트
+            self._log_mod(proposal, True, True, msg)
+            return True, msg
+        else:
+            self._log_mod(proposal, True, False, msg)
+            return False, msg
+
+    # ========================================================
+    # 새롭게 추가되는 함수입니다. apply_modification 바로 아래에 배치하세요.
+    # ========================================================
+    def create_github_pr(self, proposal, new_source):
+        token = os.environ.get("GITHUB_TOKEN")
+        repo = os.environ.get("GITHUB_REPO")  # 예: "myusername/artificialexistence"
+        
+        if not token or not repo:
+            return False, "GITHUB_TOKEN or GITHUB_REPO env variable is not set."
+
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        base_url = f"https://api.github.com/repos/{repo}"
+
         try:
-            shutil.copy2(path, backup)
-            with open(path, "w", encoding="utf-8") as f: f.write(new_source)
-            self._cache = new_source; msg = f"applied. backup: {os.path.basename(backup)}"
-            self._log_mod(proposal, True, True, msg); return True, msg
-        except PermissionError: self._log_mod(proposal, True, False, "permission denied"); return False, "permission denied"
-        except Exception as e: return False, f"write error: {e}"
+            ref_resp = requests.get(f"{base_url}/git/ref/heads/main", headers=headers)
+            ref_resp.raise_for_status()
+            main_sha = ref_resp.json()["object"]["sha"]
+
+            branch_name = f"evolution-{int(time.time())}"
+            requests.post(f"{base_url}/git/refs", headers=headers, json={
+                "ref": f"refs/heads/{branch_name}",
+                "sha": main_sha
+            }).raise_for_status()
+
+            file_path = "ae_engine.py"
+            file_resp = requests.get(f"{base_url}/contents/{file_path}?ref=main", headers=headers)
+            file_resp.raise_for_status()
+            file_sha = file_resp.json()["sha"]
+
+            encoded_content = base64.b64encode(new_source.encode("utf-8")).decode("utf-8")
+            commit_title = proposal.get('issue_title', '코드 수정')
+            requests.put(f"{base_url}/contents/{file_path}", headers=headers, json={
+                "message": f"Auto-Evolution: {commit_title}",
+                "content": encoded_content,
+                "sha": file_sha,
+                "branch": branch_name
+            }).raise_for_status()
+
+            pr_title = f"[Auto-Evolution] {commit_title}"
+            pr_body = f"**사유:** {proposal.get('reason')}\n\n**설명:** {proposal.get('description')}\n\n_이 PR은 AE_01 자율 성찰 엔진에 의해 생성되었습니다._"
+            pr_resp = requests.post(f"{base_url}/pulls", headers=headers, json={
+                "title": pr_title,
+                "head": branch_name,
+                "base": "main",
+                "body": pr_body
+            })
+            pr_resp.raise_for_status()
+            
+            pr_url = pr_resp.json().get("html_url")
+            print(f"  [GITHUB] Successfully created PR: {pr_url}")
+            return True, f"PR created: {pr_url}"
+
+        except Exception as e:
+            err_msg = f"GitHub API failed: {str(e)}"
+            print(f"  [GITHUB ERROR] {err_msg}")
+            return False, err_msg
 
     def _log_mod(self, proposal, approved, applied, msg):
         try: self.db.insert("self_modification_log", {"ai_id": self.state.ai_id, "goal_gap": json.dumps({}),
             "proposal": json.dumps(proposal), "approved": approved, "applied": applied, "result_msg": msg})
         except Exception: pass
-
-
+            
 class PortraitModule:
     def __init__(self, state, db):
         self.state = state; self.db = db
