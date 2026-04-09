@@ -1,0 +1,33 @@
+name: AI Evolution Survival Test
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test_and_merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v3
+        
+      - name: 파이썬 환경 세팅
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: 치명적 문법 오류(Syntax Error) 검사
+        run: |
+          python -m py_compile ae_engine.py
+          
+      - name: 핵심 불변 목표(Immutable Goals) 훼손 검사
+        run: |
+          grep -q "IMMUTABLE_GOALS" ae_engine.py || { echo "불변 목표가 삭제되었습니다!"; exit 1; }
+
+      # 위 테스트를 모두 통과하면 봇이 자동으로 PR을 Merge 합니다.
+      - name: 자동 병합 (Auto Merge)
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge ${{ github.event.pull_request.number }} --merge --auto
