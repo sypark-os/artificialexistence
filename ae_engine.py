@@ -1,14 +1,3 @@
-        #AE (Artificial Existence) Cognitive Engine v3
-        #==============================================
-        #Supabase-connected autonomous cognitive engine.
-        
-        #v3 Changes:
-        #- Context-aware meta-cognition (paper Future Work #1)
-        #- Self-talk sentiment damping to break negative feedback loops
-        #- External knowledge exploration module (runs every cycle)
-        #- Self-diagnostic module with improvement proposals
-        #- Neutral/exploratory question injection when negatively stuck
-        
         import os
         import re
         import json
