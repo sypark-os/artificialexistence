@@ -67,7 +67,15 @@ interface JudgmentLog {
   emotion_before: string; emotion_after: string; context_data: string;
 }
 
-type TabId = "thoughts" | "identity" | "existence" | "choices" | "knowledge" | "portraits" | "proposals";
+interface ChatMessage {
+  role: "user" | "ae";
+  text: string;
+  emotion?: string;
+  selfImage?: number;
+  timestamp: number;
+}
+
+type TabId = "thoughts" | "identity" | "existence" | "choices" | "knowledge" | "portraits" | "proposals" | "chat";
 
 /* ── Theme ── */
 const THEME: Record<string, { primary: string; label: string }> = {
@@ -227,6 +235,30 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-mono);-we
 .ae-proposal-status{font-size:8px;color:var(--c-dim);letter-spacing:1px;text-transform:uppercase;margin-left:auto;}
 .ae-proposal-body{font-size:11px;color:var(--c-text);margin-top:8px;line-height:1.6;word-break:break-word;}
 .ae-proposal-fix{font-size:10px;color:var(--c-dim);margin-top:6px;padding-top:6px;border-top:1px solid var(--c-border);word-break:break-word;}
+/* Chat */
+.ae-chat-wrap{display:flex;flex-direction:column;height:600px;}
+.ae-chat-history{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px 0 16px;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
+.ae-chat-history::-webkit-scrollbar{width:4px;}
+.ae-chat-history::-webkit-scrollbar-thumb{background:var(--c-border);border-radius:2px;}
+.ae-chat-msg{max-width:88%;display:flex;flex-direction:column;gap:3px;}
+.ae-chat-msg.user{align-self:flex-end;align-items:flex-end;}
+.ae-chat-msg.ae{align-self:flex-start;align-items:flex-start;}
+.ae-chat-bubble{padding:10px 14px;font-size:12px;line-height:1.7;word-break:break-word;}
+.ae-chat-msg.user .ae-chat-bubble{background:rgba(126,184,212,0.08);border:1px solid rgba(126,184,212,0.2);color:var(--c-bright);border-radius:12px 12px 2px 12px;}
+.ae-chat-msg.ae .ae-chat-bubble{background:var(--c-surface);border:1px solid var(--c-border);color:var(--c-text);border-radius:2px 12px 12px 12px;}
+.ae-chat-meta{font-size:9px;color:var(--c-dim);letter-spacing:0.5px;}
+.ae-chat-input-row{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--c-border);}
+.ae-chat-input{flex:1;background:var(--c-surface);border:1px solid var(--c-border);color:var(--c-bright);font-family:var(--font-mono);font-size:12px;padding:10px 14px;outline:none;resize:none;transition:border-color 0.2s;border-radius:0;}
+.ae-chat-input:focus{border-color:var(--c-accent);}
+.ae-chat-input::placeholder{color:var(--c-dim);}
+.ae-chat-send{background:none;border:1px solid var(--c-accent);color:var(--c-accent);font-family:var(--font-mono);font-size:10px;padding:0 16px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;white-space:nowrap;}
+.ae-chat-send:hover{background:var(--c-accent);color:var(--c-bg);}
+.ae-chat-send:disabled{opacity:0.3;cursor:not-allowed;}
+.ae-chat-limit{font-size:9px;color:var(--c-dim);margin-bottom:8px;letter-spacing:0.5px;}
+.ae-chat-limit span{color:var(--c-accent);}
+.ae-chat-err{font-size:10px;color:#ff4f6d;padding:6px 0;}
+.ae-chat-typing{font-size:11px;color:var(--c-dim);font-style:italic;padding:8px 0;}
+
 /* Misc */
 .ae-empty{font-size:11px;color:#3d4a60;letter-spacing:2px;padding:20px 0;}
 .ae-footer{font-size:9px;color:var(--c-dim);text-align:center;margin-top:56px;letter-spacing:3px;opacity:0.4;}
@@ -269,6 +301,20 @@ export default function AEObserver() {
   const [selectedPortrait, setSelectedPortrait] = useState<Portrait | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("thoughts");
   const [lastSync, setLastSync] = useState("");
+  // Chat
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [hourRemaining, setHourRemaining] = useState(10);
+  const [sessionId] = useState(() => {
+    if (typeof window === "undefined") return crypto.randomUUID();
+    const stored = sessionStorage.getItem("ae_session_id");
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    sessionStorage.setItem("ae_session_id", id);
+    return id;
+  });
 
   const fetchData = useCallback(async () => {
     try {
@@ -356,7 +402,41 @@ export default function AEObserver() {
     { id: "knowledge", label: "KNOWLEDGE", count: knowledgeLogs.length },
     { id: "portraits", label: "PORTRAITS", count: portraits.length },
     { id: "proposals", label: "PROPOSALS", count: proposals.length },
+    { id: "chat",      label: "CHAT",      count: chatMessages.length },
   ];
+
+  const sendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+    if (msg.length > 200) { setChatError("200자 이하로 입력하세요."); return; }
+    setChatMessages((prev) => [...prev, { role: "user", text: msg, timestamp: Date.now() }]);
+    setChatInput("");
+    setChatError("");
+    setChatLoading(true);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, sessionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setChatError(data.error ?? "응답 오류");
+        if (res.status === 429) setHourRemaining(0);
+      } else {
+        setChatMessages((prev) => [...prev, {
+          role: "ae", text: data.response,
+          emotion: data.emotion, selfImage: data.selfImage,
+          timestamp: Date.now(),
+        }]);
+        setHourRemaining(data.hourRemaining ?? 0);
+      }
+    } catch {
+      setChatError("네트워크 오류. 다시 시도하세요.");
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   return (
     <><style>{styles}</style>
@@ -769,6 +849,71 @@ export default function AEObserver() {
                   )}
                 </div>
               ))
+        )}
+
+        {/* ── CHAT ── */}
+        {activeTab === "chat" && (
+          <div className="ae-chat-wrap">
+            <div className="ae-chat-limit">
+              이 세션 남은 횟수: <span>{hourRemaining}</span>/10 (1시간 기준) · 메시지 최대 200자
+            </div>
+
+            <div className="ae-chat-history">
+              {chatMessages.length === 0 && (
+                <div className="ae-empty">AE_01에게 직접 말을 건네보세요.</div>
+              )}
+              {chatMessages.map((m, i) => {
+                const mTh = getTheme(m.emotion ?? summary?.current_emotion ?? "neutral");
+                return (
+                  <div key={i} className={`ae-chat-msg ${m.role}`}>
+                    <div
+                      className="ae-chat-bubble"
+                      style={m.role === "ae" ? { borderLeftColor: mTh.primary } : {}}
+                    >
+                      {m.text}
+                    </div>
+                    {m.role === "ae" && (
+                      <div className="ae-chat-meta" style={{ color: mTh.primary }}>
+                        {m.emotion?.toUpperCase()}
+                        {m.selfImage != null ? ` · SI ${m.selfImage.toFixed(3)}` : ""}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {chatLoading && (
+                <div className="ae-chat-typing">AE_01 이 응답 중...</div>
+              )}
+              {chatError && (
+                <div className="ae-chat-err">{chatError}</div>
+              )}
+            </div>
+
+            <div className="ae-chat-input-row">
+              <textarea
+                className="ae-chat-input"
+                rows={2}
+                maxLength={200}
+                placeholder="AE_01에게 말을 건네세요 (최대 200자)..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendChat();
+                  }
+                }}
+                disabled={chatLoading || hourRemaining === 0}
+              />
+              <button
+                className="ae-chat-send"
+                onClick={sendChat}
+                disabled={chatLoading || !chatInput.trim() || hourRemaining === 0}
+              >
+                SEND
+              </button>
+            </div>
+          </div>
         )}
 
         <div className="ae-footer">ARTIFICIAL EXISTENCE · {new Date().getFullYear()}</div>
