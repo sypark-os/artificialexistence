@@ -365,10 +365,7 @@ def apply_modification(self, proposal):
             self._log_mod(proposal, True, False, msg)
             return False, msg
 
-    # ========================================================
-    # 새롭게 추가되는 함수입니다. apply_modification 바로 아래에 배치하세요.
-    # ========================================================
-    def create_github_pr(self, proposal, new_source):
+def create_github_pr(self, proposal, new_source):
         token = os.environ.get("GITHUB_TOKEN")
         repo = os.environ.get("GITHUB_REPO")  # 예: "myusername/artificialexistence"
         
