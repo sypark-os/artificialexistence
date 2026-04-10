@@ -614,17 +614,14 @@ class MemoryModule:
             print(f"  [MEMORY] Stored: '{engram[:60]}'")
 
     def retrieve_memories(self):
-        if self.state.memory_slots_used == 0:
-            return "No past memories to recall. You are entirely in the present."
-
         try:
             records = self.db.select("memory_store", {
                 "ai_id": f"eq.{self.state.ai_id}",
                 "order": "importance.desc",
                 "limit": "10"
             })
-            if not records or isinstance(records, dict):
-                return "Memory retrieval failed."
+            if not records or isinstance(records, dict) or len(records) == 0:
+                return "No past memories to recall. You are entirely in the present."
 
             sampled = random.sample(records, min(3, len(records)))
             memories = [f"({r.get('memory_type','?')}): {r.get('content', '')}" for r in sampled]
