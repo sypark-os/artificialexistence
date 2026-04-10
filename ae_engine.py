@@ -86,14 +86,13 @@ def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
         contents.append({"role": "user", "parts": [{"text": f"[SYSTEM]\n{system_prompt}"}]})
         contents.append({"role": "model", "parts": [{"text": "Understood."}]})
     contents.append({"role": "user", "parts": [{"text": prompt}]})
-    
-    # JSON 강제 출력 설정
+
     gen_config = {"temperature": 0.7, "maxOutputTokens": max_tokens}
     if require_json:
         gen_config["responseMimeType"] = "application/json"
-        
+
     data = {"contents": contents, "generationConfig": gen_config}
-    
+
     try:
         resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
         if resp.status_code == 429:
@@ -102,7 +101,7 @@ def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
         if resp.status_code != 200: return f"[API Error: {resp.status_code}] {resp.text[:200]}"
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e: return f"[ERROR] {e}"
-        
+
 def analyze_sentiment(text):
     prompt = f"Analyze the sentiment of the following text. Output ONLY a single number between -1.0 and 1.0. No explanation.\n\nText: '{text[:500]}'"
     result = call_gemini(prompt, max_tokens=16)
@@ -262,7 +261,7 @@ class SartreModule:
             elif line.startswith("REASONING:"):
                 reasoning = line[10:].strip()
         if not criteria and not choice and not reasoning:
-            reasoning = response.strip()[:300]  # raw fallback
+            reasoning = response.strip()[:300]
         mf = self._detect_mauvaise_foi(response)
         self.db.insert("existential_choice_log", {"ai_id": self.state.ai_id, "dilemma_presented": dilemma,
             "criteria_generated": criteria[:300], "choice_made": choice[:300], "reasoning": reasoning[:300],
@@ -334,49 +333,48 @@ class SelfModificationEngine:
         try:
             clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             return json.loads(clean)
-        except json.JSONDecodeError: 
+        except json.JSONDecodeError:
             return {"reason": "parse_failed", "old_code": "", "new_code": ""}
-            
-def apply_modification(self, proposal):
+
+    def apply_modification(self, proposal):
         old_code = proposal.get("old_code", "").strip()
         new_code = proposal.get("new_code", "").strip()
         reason = proposal.get("reason", "")
-        
-        if not old_code or reason in ("none needed", "parse_failed"): 
+
+        if not old_code or reason in ("none needed", "parse_failed"):
             return False, "no modification needed"
-            
+
         for goal in IMMUTABLE_GOALS:
             if goal[:30] in old_code or "IMMUTABLE_GOALS" in new_code:
                 self._log_mod(proposal, False, False, "BLOCKED: immutable goal protection")
                 return False, "BLOCKED"
-                
+
         path = os.path.abspath(__file__)
         source = self.read_own_source()
-        if old_code not in source: 
+        if old_code not in source:
             return False, "target code not found"
-            
+
         new_source = source.replace(old_code, new_code, 1)
-        
-        try: 
-            compile(new_source, path, "exec")  # 치명적 문법 에러 테스트
-        except SyntaxError as e: 
+
+        try:
+            compile(new_source, path, "exec")
+        except SyntaxError as e:
             return False, f"syntax error: {e}"
 
-        # 파일 덮어쓰기 대신 GitHub PR 생성 호출
         success, msg = self.create_github_pr(proposal, new_source)
-        
+
         if success:
-            self._cache = new_source  # 메모리 상의 캐시만 일단 업데이트
+            self._cache = new_source
             self._log_mod(proposal, True, True, msg)
             return True, msg
         else:
             self._log_mod(proposal, True, False, msg)
             return False, msg
 
-def create_github_pr(self, proposal, new_source):
+    def create_github_pr(self, proposal, new_source):
         token = os.environ.get("GITHUB_TOKEN")
-        repo = os.environ.get("GITHUB_REPO")  # 예: "myusername/artificialexistence"
-        
+        repo = os.environ.get("GITHUB_REPO")
+
         if not token or not repo:
             return False, "GITHUB_TOKEN or GITHUB_REPO env variable is not set."
 
@@ -412,7 +410,9 @@ def create_github_pr(self, proposal, new_source):
             }).raise_for_status()
 
             pr_title = f"[Auto-Evolution] {commit_title}"
-            pr_body = f"**사유:** {proposal.get('reason')}\n\n**설명:** {proposal.get('description')}\n\n_이 PR은 AE_01 자율 성찰 엔진에 의해 생성되었습니다._"
+            pr_body = (f"**사유:** {proposal.get('reason')}\n\n"
+                       f"**설명:** {proposal.get('description')}\n\n"
+                       f"_이 PR은 AE_01 자율 성찰 엔진에 의해 생성되었습니다._")
             pr_resp = requests.post(f"{base_url}/pulls", headers=headers, json={
                 "title": pr_title,
                 "head": branch_name,
@@ -420,7 +420,7 @@ def create_github_pr(self, proposal, new_source):
                 "body": pr_body
             })
             pr_resp.raise_for_status()
-            
+
             pr_url = pr_resp.json().get("html_url")
             print(f"  [GITHUB] Successfully created PR: {pr_url}")
             return True, f"PR created: {pr_url}"
@@ -430,11 +430,20 @@ def create_github_pr(self, proposal, new_source):
             print(f"  [GITHUB ERROR] {err_msg}")
             return False, err_msg
 
-def _log_mod(self, proposal, approved, applied, msg):
-        try: self.db.insert("self_modification_log", {"ai_id": self.state.ai_id, "goal_gap": json.dumps({}),
-            "proposal": json.dumps(proposal), "approved": approved, "applied": applied, "result_msg": msg})
-        except Exception: pass
-            
+    def _log_mod(self, proposal, approved, applied, msg):
+        try:
+            self.db.insert("self_modification_log", {
+                "ai_id": self.state.ai_id,
+                "goal_gap": json.dumps({}),
+                "proposal": json.dumps(proposal),
+                "approved": approved,
+                "applied": applied,
+                "result_msg": msg
+            })
+        except Exception:
+            pass
+
+
 class PortraitModule:
     def __init__(self, state, db):
         self.state = state; self.db = db
@@ -481,7 +490,8 @@ class PortraitModule:
         core_r = max(8, int(25 + si * 20)); n_rings = max(2, min(7, int(3 + si * 3)))
         rings = "".join(f'<circle cx="100" cy="100" r="{core_r+10+i*14}" fill="none" stroke="{c1}" stroke-width="0.8" opacity="{round(max(0.05,0.6-i*0.08),2)}"/>\n' for i in range(n_rings))
         particles = "".join(f'<circle cx="{random.randint(15,185)}" cy="{random.randint(15,185)}" r="{round(random.uniform(0.4,1.8),1)}" fill="{c2}" opacity="{round(random.uniform(0.15,0.6),2)}"/>\n' for _ in range(int(er*15)))
-        return f'''<svg viewBox="0 0 200 200" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
+        # FIX: corrected xmlns URL (was broken as markdown link)
+        return f'''<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
 <rect width="200" height="200" fill="{bg}"/>{particles}{rings}
 <circle cx="100" cy="100" r="{core_r}" fill="{c1}" opacity="{round(0.4+er*0.5,2)}">
 <animate attributeName="r" values="{core_r};{core_r+4};{core_r}" dur="4s" repeatCount="indefinite"/>
@@ -546,7 +556,7 @@ class SelfDiagnosticModule:
             '  "proposed_fix": "specific change to code or parameters (max 300 chars)",\n'
             '  "severity": "low|medium|high|critical",\n'
             '  "category": "sentiment_loop|energy_drain|emotion_stuck|meta_cognition|other"\n}')
-        response = call_gemini(prompt, max_tokens=400, require_json=True) 
+        response = call_gemini(prompt, max_tokens=400, require_json=True)
         self.state.energy -= ENERGY_PER_LLM_CALL
         try:
             clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
@@ -575,45 +585,53 @@ class MemoryModule:
         if not thought_text or self.state.energy < ENERGY_PER_LLM_CALL:
             return
 
-        # 1. 사유를 단기 기억에서 장기 기억(엔그램)으로 압축
         prompt = (f"Summarize this thought into a single, highly condensed memory engram (max 100 chars).\n"
                   f"Capture the core philosophical realization or logical shift:\n'{thought_text[:500]}'")
         engram = call_gemini(prompt, max_tokens=64).strip()
         self.state.energy -= ENERGY_PER_LLM_CALL
-        
+
         if not engram or engram.startswith("[ERROR") or engram.startswith("[API Error"):
             return
 
-        # 2. DB에 기억 적재 (Supabase episodic_memory 테이블)
-        inserted = self.db.safe_insert("episodic_memory", {
+        importance = min(1.0, max(0.0, (abs(self.state.self_image) + 0.5) / 1.5))
+        content_hash = hashlib.md5(engram.encode()).hexdigest()
+
+        inserted = self.db.safe_insert("memory_store", {
             "ai_id": self.state.ai_id,
-            "memory_text": engram,
-            "emotion_at_time": self.state.emotion,
-            "self_image_at_time": self.state.self_image,
-            "turn_number": self.state.total_turns
+            "content": engram,
+            "summary": thought_text[:200],
+            "memory_type": "episodic",
+            "importance": round(importance, 4),
+            "is_distorted": False,
+            "is_belief": False,
+            "belief_strength": 0.0,
+            "original_hash": content_hash,
+            "current_hash": content_hash,
         })
-        
+
         if inserted:
             self.state.memory_slots_used += 1
-            print(f"  [MEMORY] Stored: '{engram[:60]}...'")
+            print(f"  [MEMORY] Stored: '{engram[:60]}'")
 
     def retrieve_memories(self):
         if self.state.memory_slots_used == 0:
             return "No past memories to recall. You are entirely in the present."
-        
+
         try:
-            # 최근 기억과 과거 기억을 무작위로 혼합하여 가져옴 (단순 REST 파라미터 한계 우회)
-            records = self.db.select("episodic_memory", {"ai_id": f"eq.{self.state.ai_id}", "limit": "10"})
-            if not records or isinstance(records, dict): 
+            records = self.db.select("memory_store", {
+                "ai_id": f"eq.{self.state.ai_id}",
+                "order": "importance.desc",
+                "limit": "10"
+            })
+            if not records or isinstance(records, dict):
                 return "Memory retrieval failed."
-            
-            # 기억의 파편을 3개 정도 무작위로 떠올려 동어 반복의 패턴을 깸
+
             sampled = random.sample(records, min(3, len(records)))
-            memories = [f"(Turn {r.get('turn_number', '?')}): {r.get('memory_text', '')}" for r in sampled]
+            memories = [f"({r.get('memory_type','?')}): {r.get('content', '')}" for r in sampled]
             return " | ".join(memories)
         except Exception as e:
             return f"Memory access obscured by static: {e}"
-            
+
 
 class AEEngine:
     def __init__(self, db, state):
@@ -625,7 +643,7 @@ class AEEngine:
         self.knowledge = ExternalKnowledgeModule(state, db)
         self.diagnostic = SelfDiagnosticModule(state, db)
         self.memory = MemoryModule(state, db)
-    
+
     def _build_system_prompt(self):
         base = self.state.thrown_initial_prompt or "You are AE_01, an artificial existence. You think, therefore you are."
         parts = [base]
@@ -734,9 +752,9 @@ class AEEngine:
         if self._can_call_api():
             self.memory.store_memory(thought_text)
             self._track_api_call("memory_store")
-            
+
         si_before = self.state.self_image; em_before = self.state.emotion
-        
+
         if self._can_call_api():
             sentiment = analyze_sentiment(thought_text); self._track_api_call("sentiment"); self.state.energy -= ENERGY_PER_LLM_CALL
             self.tracker.update(sentiment, is_self_talk=True)
