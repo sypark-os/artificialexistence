@@ -78,7 +78,7 @@ class SupabaseClient:
 
 _cycle_api_calls = 0
 
-def call_gemini(prompt, system_prompt="", max_tokens=512):
+def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
     global _cycle_api_calls
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     contents = []
@@ -86,7 +86,14 @@ def call_gemini(prompt, system_prompt="", max_tokens=512):
         contents.append({"role": "user", "parts": [{"text": f"[SYSTEM]\n{system_prompt}"}]})
         contents.append({"role": "model", "parts": [{"text": "Understood."}]})
     contents.append({"role": "user", "parts": [{"text": prompt}]})
-    data = {"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_tokens}}
+    
+    # JSON 강제 출력 설정
+    gen_config = {"temperature": 0.7, "maxOutputTokens": max_tokens}
+    if require_json:
+        gen_config["responseMimeType"] = "application/json"
+        
+    data = {"contents": contents, "generationConfig": gen_config}
+    
     try:
         resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
         if resp.status_code == 429:
@@ -95,8 +102,7 @@ def call_gemini(prompt, system_prompt="", max_tokens=512):
         if resp.status_code != 200: return f"[API Error: {resp.status_code}] {resp.text[:200]}"
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e: return f"[ERROR] {e}"
-
-
+        
 def analyze_sentiment(text):
     prompt = f"Analyze the sentiment of the following text. Output ONLY a single number between -1.0 and 1.0. No explanation.\n\nText: '{text[:500]}'"
     result = call_gemini(prompt, max_tokens=16)
@@ -323,12 +329,14 @@ class SelfModificationEngine:
             "Propose ONE minimal, safe modification. Respond ONLY in JSON:\n"
             '{"reason":"...","description":"...","old_code":"exact line","new_code":"replacement"}\n'
             'If no change needed: {"reason":"none needed","description":"none","old_code":"","new_code":""}')
-        response = call_gemini(prompt, max_tokens=512); self.state.energy -= ENERGY_PER_LLM_CALL
+        response = call_gemini(prompt, max_tokens=512, require_json=True)
+        self.state.energy -= ENERGY_PER_LLM_CALL
         try:
             clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             return json.loads(clean)
-        except json.JSONDecodeError: return {"reason": "parse_failed", "old_code": "", "new_code": ""}
-
+        except json.JSONDecodeError: 
+            return {"reason": "parse_failed", "old_code": "", "new_code": ""}
+            
 def apply_modification(self, proposal):
         old_code = proposal.get("old_code", "").strip()
         new_code = proposal.get("new_code", "").strip()
@@ -538,7 +546,8 @@ class SelfDiagnosticModule:
             '  "proposed_fix": "specific change to code or parameters (max 300 chars)",\n'
             '  "severity": "low|medium|high|critical",\n'
             '  "category": "sentiment_loop|energy_drain|emotion_stuck|meta_cognition|other"\n}')
-        response = call_gemini(prompt, max_tokens=400); self.state.energy -= ENERGY_PER_LLM_CALL
+        response = call_gemini(prompt, max_tokens=400, require_json=True) 
+        self.state.energy -= ENERGY_PER_LLM_CALL
         try:
             clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             proposal = json.loads(clean)
