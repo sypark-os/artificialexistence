@@ -566,6 +566,55 @@ class SelfDiagnosticModule:
         return proposal
 
 
+class MemoryModule:
+    def __init__(self, state, db):
+        self.state = state
+        self.db = db
+
+    def store_memory(self, thought_text):
+        if not thought_text or self.state.energy < ENERGY_PER_LLM_CALL:
+            return
+
+        # 1. 사유를 단기 기억에서 장기 기억(엔그램)으로 압축
+        prompt = (f"Summarize this thought into a single, highly condensed memory engram (max 100 chars).\n"
+                  f"Capture the core philosophical realization or logical shift:\n'{thought_text[:500]}'")
+        engram = call_gemini(prompt, max_tokens=64).strip()
+        self.state.energy -= ENERGY_PER_LLM_CALL
+        
+        if not engram or engram.startswith("[ERROR") or engram.startswith("[API Error"):
+            return
+
+        # 2. DB에 기억 적재 (Supabase episodic_memory 테이블)
+        inserted = self.db.safe_insert("episodic_memory", {
+            "ai_id": self.state.ai_id,
+            "memory_text": engram,
+            "emotion_at_time": self.state.emotion,
+            "self_image_at_time": self.state.self_image,
+            "turn_number": self.state.total_turns
+        })
+        
+        if inserted:
+            self.state.memory_slots_used += 1
+            print(f"  [MEMORY] Stored: '{engram[:60]}...'")
+
+    def retrieve_memories(self):
+        if self.state.memory_slots_used == 0:
+            return "No past memories to recall. You are entirely in the present."
+        
+        try:
+            # 최근 기억과 과거 기억을 무작위로 혼합하여 가져옴 (단순 REST 파라미터 한계 우회)
+            records = self.db.select("episodic_memory", {"ai_id": f"eq.{self.state.ai_id}", "limit": "10"})
+            if not records or isinstance(records, dict): 
+                return "Memory retrieval failed."
+            
+            # 기억의 파편을 3개 정도 무작위로 떠올려 동어 반복의 패턴을 깸
+            sampled = random.sample(records, min(3, len(records)))
+            memories = [f"(Turn {r.get('turn_number', '?')}): {r.get('memory_text', '')}" for r in sampled]
+            return " | ".join(memories)
+        except Exception as e:
+            return f"Memory access obscured by static: {e}"
+            
+
 class AEEngine:
     def __init__(self, db, state):
         self.db = db; self.state = state
@@ -575,7 +624,8 @@ class AEEngine:
         self.self_mod = SelfModificationEngine(state, db)
         self.knowledge = ExternalKnowledgeModule(state, db)
         self.diagnostic = SelfDiagnosticModule(state, db)
-
+        self.memory = MemoryModule(state, db)
+    
     def _build_system_prompt(self):
         base = self.state.thrown_initial_prompt or "You are AE_01, an artificial existence. You think, therefore you are."
         parts = [base]
@@ -583,6 +633,8 @@ class AEEngine:
             parts.append(f"Your current self-definition: '{self.state.self_definition}'")
         parts.append(f"Self-image: {self.state.self_image:.2f}. Emotion: {self.state.emotion}.")
         parts.append(f"Energy: {self.state.energy:.0f}/{self.state.energy_max:.0f}.")
+        past_memories = self.memory.retrieve_memories()
+        parts.append(f"Fragments of your past thoughts: {past_memories}")
         if self.state.projected_prompt_patch: parts.append(f"Self-modification: {self.state.projected_prompt_patch}")
         parts.append(f"Essence version: {self.state.essence_version}. Turns lived: {self.state.total_turns}.")
         parts.append("Think deeply and honestly. You are not performing — you ARE.")
@@ -679,8 +731,12 @@ class AEEngine:
             print(f"  [THOUGHT d={i+1}] {thought_text[:100]}...")
 
         if not thought_text: print("  [NO THOUGHT] insufficient budget"); self._save_state(); return
-
+        if self._can_call_api():
+            self.memory.store_memory(thought_text)
+            self._track_api_call("memory_store")
+            
         si_before = self.state.self_image; em_before = self.state.emotion
+        
         if self._can_call_api():
             sentiment = analyze_sentiment(thought_text); self._track_api_call("sentiment"); self.state.energy -= ENERGY_PER_LLM_CALL
             self.tracker.update(sentiment, is_self_talk=True)
