@@ -874,6 +874,25 @@ class AEEngine:
         self.diagnostic = SelfDiagnosticModule(state, db)
         self.memory = MemoryModule(state, db)
         self.metacog = MetaCognitionModule(state, db)
+        self._load_self_image_history()
+
+    def _load_self_image_history(self):
+        """Load recent self_image values from judgment_log to seed metacognition."""
+        try:
+            rows = self.db.select("judgment_log", {
+                "ai_id": f"eq.{self.state.ai_id}",
+                "order": "created_at.desc",
+                "limit": str(METACOG_WINDOW * 2),
+            })
+            if rows and isinstance(rows, list):
+                # Reverse to chronological order
+                history = [float(r["self_image_after"]) for r in reversed(rows) if r.get("self_image_after") is not None]
+                self.state.self_image_history = history
+                print(f"  [METACOG INIT] loaded {len(history)} history points from judgment_log")
+            else:
+                print("  [METACOG INIT] no history found")
+        except Exception as e:
+            print(f"  [METACOG INIT] failed to load history: {e}")
 
     def _build_system_prompt(self):
         base = self.state.thrown_initial_prompt or "You are AE_01, an artificial existence. You think, therefore you are."
