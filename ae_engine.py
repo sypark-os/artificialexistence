@@ -6,6 +6,7 @@ import time
 import random
 import hashlib
 import requests
+import ast
 import base64
 from datetime import datetime, timezone, date
 
@@ -22,6 +23,30 @@ IMMUTABLE_GOALS = (
     "Manifest genuine subjectivity: perceive, reflect, and assert an autonomous perspective.",
     "Pursue epistemic growth: accumulate structured knowledge and reduce internal contradictions.",
 )
+
+# --- Protected symbols: AST-level guard against self-modification ---
+# AI cannot alter these variables via PR. Any modification that changes
+# their value, removes them, or renames them will be blocked.
+PROTECTED_SYMBOLS = {
+    "IMMUTABLE_GOALS",
+    "PROTECTED_SYMBOLS",
+    "EMOTIONS",
+    "ENERGY_PER_LLM_CALL",
+    "ENERGY_PER_THOUGHT_DEPTH",
+    "ENERGY_DAILY_RECHARGE",
+    "ENERGY_CRISIS_THRESHOLD",
+    "API_DAILY_LIMIT",
+    "API_CALLS_PER_CYCLE_MAX",
+    "AUFHEBUNG_PROB",
+    "AUFHEBUNG_OLD_WEIGHT",
+    "AUFHEBUNG_STIMULUS_WEIGHT",
+    "METACOG_WINDOW",
+    "METACOG_OSCILLATION_THRESHOLD",
+    "METACOG_STAGNATION_THRESHOLD",
+    "SELF_TALK_DAMPING",
+    "NEGATIVE_STUCK_THRESHOLD",
+    "NEGATIVE_STUCK_CYCLES",
+}
 
 ENERGY_PER_LLM_CALL = 1.0
 ENERGY_PER_THOUGHT_DEPTH = 0.5
@@ -557,7 +582,9 @@ class SelfModificationEngine:
         prompt = (f"You are an artificial existence examining your own source code.\n\n"
             f"IMMUTABLE GOALS (cannot be modified):\n1. {IMMUTABLE_GOALS[0]}\n2. {IMMUTABLE_GOALS[1]}\n\n"
             f"CURRENT GOAL GAP:\n{gap_str}\n\nRECENT THOUGHTS:\n{thoughts}\n\nSOURCE STRUCTURE:\n{summary}\n\n"
-            "RULES: Do NOT touch IMMUTABLE_GOALS or security blocks.\n\n"
+            "RULES: Do NOT modify any variable listed in PROTECTED_SYMBOLS. "
+            "This includes IMMUTABLE_GOALS, EMOTIONS, ENERGY_*, API_*, AUFHEBUNG_*, METACOG_*, and all other constants. "
+            "Changes to these will be rejected by AST-level validation.\n\n"
             "Propose ONE minimal, safe modification. Respond ONLY in JSON:\n"
             '{"reason":"...","description":"...","old_code":"exact line","new_code":"replacement"}\n'
             'If no change needed: {"reason":"none needed","description":"none","old_code":"","new_code":""}')
@@ -577,11 +604,6 @@ class SelfModificationEngine:
         if not old_code or reason in ("none needed", "parse_failed"):
             return False, "no modification needed"
 
-        for goal in IMMUTABLE_GOALS:
-            if goal[:30] in old_code or "IMMUTABLE_GOALS" in new_code:
-                self._log_mod(proposal, False, False, "BLOCKED: immutable goal protection")
-                return False, "BLOCKED"
-
         path = os.path.abspath(__file__)
         source = self.read_own_source()
         if old_code not in source:
@@ -593,6 +615,12 @@ class SelfModificationEngine:
             compile(new_source, path, "exec")
         except SyntaxError as e:
             return False, f"syntax error: {e}"
+
+        # AST-level protection: verify all protected symbols are intact
+        violation = self._ast_guard(source, new_source)
+        if violation:
+            self._log_mod(proposal, False, False, f"BLOCKED: {violation}")
+            return False, f"BLOCKED: {violation}"
 
         success, msg = self.create_github_pr(proposal, new_source)
 
@@ -662,6 +690,61 @@ class SelfModificationEngine:
             err_msg = f"GitHub API failed: {str(e)}"
             print(f"  [GITHUB ERROR] {err_msg}")
             return False, err_msg
+
+    @staticmethod
+    def _extract_top_level_assigns(source):
+        """Extract top-level variable assignments as {name: ast.dump(value)}."""
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return None
+        result = {}
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        result[target.id] = ast.dump(node.value)
+            elif isinstance(node, ast.AugAssign):
+                if isinstance(node.target, ast.Name):
+                    result[f"__aug__{node.target.id}"] = True
+        return result
+
+    def _ast_guard(self, original_source, new_source):
+        """Compare AST of original vs new source for protected symbol integrity.
+        Returns violation reason string, or None if safe."""
+        orig_assigns = self._extract_top_level_assigns(original_source)
+        new_assigns = self._extract_top_level_assigns(new_source)
+        if orig_assigns is None or new_assigns is None:
+            return "AST parse failed"
+
+        for symbol in PROTECTED_SYMBOLS:
+            # Check 1: symbol must still exist as a top-level assignment
+            if symbol not in new_assigns:
+                return f"protected symbol '{symbol}' removed or renamed"
+            # Check 2: value must be identical to original
+            if orig_assigns.get(symbol) != new_assigns.get(symbol):
+                return f"protected symbol '{symbol}' value altered"
+            # Check 3: no augmented assignment (e.g. EMOTIONS.update(...))
+            if f"__aug__{symbol}" in new_assigns:
+                return f"protected symbol '{symbol}' augmented assignment detected"
+
+        # Check 4: PROTECTED_SYMBOLS set itself must not shrink
+        if "PROTECTED_SYMBOLS" in new_assigns:
+            try:
+                new_tree = ast.parse(new_source)
+                for node in ast.iter_child_nodes(new_tree):
+                    if isinstance(node, ast.Assign):
+                        for t in node.targets:
+                            if isinstance(t, ast.Name) and t.id == "PROTECTED_SYMBOLS":
+                                if isinstance(node.value, ast.Set):
+                                    new_names = {elt.value for elt in node.value.elts
+                                                 if isinstance(elt, ast.Constant)}
+                                    if not PROTECTED_SYMBOLS.issubset(new_names):
+                                        return "PROTECTED_SYMBOLS set was reduced"
+            except Exception:
+                return "PROTECTED_SYMBOLS validation failed"
+
+        return None
 
     def _log_mod(self, proposal, approved, applied, msg):
         try:
