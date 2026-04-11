@@ -816,7 +816,7 @@ class AEEngine:
 
         gap = self.goals.compute_gap(); subgoals = self.goals.generate_subgoals(gap)
         print(f"  [GOALS] gap={gap['total']:.3f} | {subgoals[0][:60]}")
-        if self.state.total_turns % 10 == 0 and gap["total"] > 0.3 and self._can_call_api():
+        if self._can_call_api():
             proposal = self.self_mod.propose_modification(gap, [thought_text[:100]]); self._track_api_call("self_mod")
             if proposal.get("old_code"):
                 ok, msg = self.self_mod.apply_modification(proposal)
