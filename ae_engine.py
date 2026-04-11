@@ -35,6 +35,16 @@ SELF_TALK_DAMPING = 0.3
 NEGATIVE_STUCK_THRESHOLD = -0.4
 NEGATIVE_STUCK_CYCLES = 2
 
+# --- Aufhebung constants (paper v3) ---
+AUFHEBUNG_PROB = 0.3
+AUFHEBUNG_OLD_WEIGHT = 0.3
+AUFHEBUNG_STIMULUS_WEIGHT = 0.2
+
+# --- Metacognition constants (paper v3) ---
+METACOG_WINDOW = 5
+METACOG_OSCILLATION_THRESHOLD = 3
+METACOG_STAGNATION_THRESHOLD = 0.02
+
 EMOTIONS = {
     "neutral":    {"neg_weight": 1.5, "pos_weight": 1.0, "resistance_factor": 0.1,
                    "bias_acceptance_prob": 0.5, "threshold_up": 0.3, "threshold_down": -0.3},
@@ -46,6 +56,8 @@ EMOTIONS = {
                    "bias_acceptance_prob": 0.8, "threshold_up": 0.4, "threshold_down": -999},
     "sadness":    {"neg_weight": 1.0, "pos_weight": 2.0, "resistance_factor": 0.02,
                    "bias_acceptance_prob": 0.2, "threshold_up": 0.3, "threshold_down": -999},
+    "confusion":  {"neg_weight": 1.3, "pos_weight": 1.3, "resistance_factor": 0.15,
+                   "bias_acceptance_prob": 0.4, "threshold_up": 0.2, "threshold_down": -0.2},
 }
 
 class SupabaseClient:
@@ -77,6 +89,7 @@ class SupabaseClient:
 
 
 _cycle_api_calls = 0
+_cogito_count = 0  # Cogito activation counter per cycle
 
 def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
     global _cycle_api_calls
@@ -114,6 +127,28 @@ def analyze_sentiment(text):
     return 0.5 if p > n else (-0.5 if n > p else 0.0)
 
 
+# ============================================================
+# [FEATURE 4] Cogito – Kantian Apperception
+# ============================================================
+def cogito_ergo_sum(state, act_type, detail=""):
+    """Self-referential registration function.
+    Accompanies every cognitive act (sentiment analysis, emotion transition,
+    self-reflection, Aufhebung, etc.). Observation-only: does not alter state.
+    Returns the cogito record for optional logging."""
+    global _cogito_count
+    _cogito_count += 1
+    record = {
+        "tick": _cogito_count,
+        "act_type": act_type,
+        "self_image": state.self_image,
+        "emotion": state.emotion,
+        "energy": state.energy,
+        "detail": str(detail)[:200],
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    return record
+
+
 class AEState:
     def __init__(self, row):
         self.ai_id = row["ai_id"]
@@ -136,14 +171,26 @@ class AEState:
         self.daily_api_calls = int(row.get("daily_api_calls") or 0)
         self.daily_api_reset_date = row.get("daily_api_reset_date")
         self.consecutive_negative_cycles = int(row.get("consecutive_negative_cycles") or 0)
+        # Metacognition: recent self_image history for pattern detection
+        self.self_image_history = []
 
 
+# ============================================================
+# [FEATURE 1] Quadrant Collision Emotion Matrix
+# [FEATURE 2] Aufhebung Mechanism
+# ============================================================
 class SelfImageTracker:
     def __init__(self, state):
         self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
+        self.last_aufhebung = False
 
     def update(self, sentiment, is_self_talk=True):
         if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
+
+        # Cogito: register sentiment processing
+        cogito_ergo_sum(self.state, "sentiment_processing",
+                        f"raw={sentiment:.3f} damped={is_self_talk}")
+
         em = self.state.emotion if self.state.emotion in EMOTIONS else "neutral"
         params = EMOTIONS[em]
         resistance = params["resistance_factor"]
@@ -157,15 +204,191 @@ class SelfImageTracker:
         impact = resisted * weight; self.last_raw = sentiment; self.last_weight = weight; self.last_impact = impact
         decay = 0.05
         self.state.self_image = max(-1.0, min(1.0, self.state.self_image * (1 - decay) + impact * decay * 10))
-        self._transition_emotion()
 
-    def _transition_emotion(self):
+        # [FEATURE 1] Quadrant collision emotion determination
+        new_emotion = self._determine_emotion_by_quadrant(sentiment)
+
+        # [FEATURE 2] Aufhebung check: confusion + positive stimulus -> qualitative leap
+        self.last_aufhebung = False
+        if new_emotion == "confusion" or self.state.emotion == "confusion":
+            self.last_aufhebung = self._attempt_aufhebung(sentiment)
+
+        self.state.emotion = new_emotion
+
+        # Cogito: register emotion transition result
+        cogito_ergo_sum(self.state, "emotion_transition",
+                        f"-> {new_emotion} aufhebung={self.last_aufhebung}")
+
+        # Record to history for metacognition
+        self.state.self_image_history.append(self.state.self_image)
+        if len(self.state.self_image_history) > METACOG_WINDOW * 2:
+            self.state.self_image_history = self.state.self_image_history[-METACOG_WINDOW * 2:]
+
+    def _determine_emotion_by_quadrant(self, stimulus):
+        """Paper v3 quadrant collision model:
+        Q1: si >= 0, stimulus >= 0 -> confidence (reinforcement)
+        Q2: si >= 0, stimulus < 0  -> anxiety (threat to positive self)
+        Q3: si < 0,  stimulus >= 0 -> confusion (conflict: negative self + positive input)
+        Q4: si < 0,  stimulus < 0  -> sadness / anger (reinforced negativity)
+        """
         si = self.state.self_image
-        if si > 0.5: self.state.emotion = "confidence"
-        elif si > 0.1: self.state.emotion = "neutral"
-        elif si > -0.2: self.state.emotion = "anxiety"
-        elif si > -0.5: self.state.emotion = "sadness"
-        else: self.state.emotion = "anger"
+
+        if si >= 0 and stimulus >= 0:
+            # Q1: positive reinforcement
+            return "confidence" if si > 0.3 or stimulus > 0.3 else "neutral"
+        elif si >= 0 and stimulus < 0:
+            # Q2: threat to positive self-image
+            if stimulus < -0.5:
+                return "anger"
+            return "anxiety"
+        elif si < 0 and stimulus >= 0:
+            # Q3: conflict — this is the Aufhebung trigger zone
+            return "confusion"
+        else:
+            # Q4: negative reinforcement
+            if si < -0.5:
+                return "anger"
+            return "sadness"
+
+    def _attempt_aufhebung(self, stimulus):
+        """Paper v3 Aufhebung: when in confusion state (negative self + positive stimulus),
+        probabilistically attempt qualitative synthesis.
+        Formula: new_si = old_si * 0.3 + stimulus * 0.2
+        """
+        # Aufhebung only fires on positive stimulus against negative self-image
+        if self.state.self_image >= 0 or stimulus <= 0:
+            return False
+
+        if random.random() > AUFHEBUNG_PROB:
+            return False
+
+        old_si = self.state.self_image
+        synthesized = old_si * AUFHEBUNG_OLD_WEIGHT + stimulus * AUFHEBUNG_STIMULUS_WEIGHT
+        self.state.self_image = max(-1.0, min(1.0, synthesized))
+        self.state.synthesis_count += 1
+
+        # Cogito: register Aufhebung event
+        cogito_ergo_sum(self.state, "aufhebung",
+                        f"old={old_si:.3f} stim={stimulus:.3f} -> synth={synthesized:.3f} count={self.state.synthesis_count}")
+
+        print(f"  [AUFHEBUNG] synthesis #{self.state.synthesis_count}: "
+              f"old_si={old_si:.3f} + stimulus={stimulus:.3f} -> new_si={self.state.self_image:.3f}")
+        return True
+
+
+# ============================================================
+# [FEATURE 3] Metacognition Layer
+# ============================================================
+class MetaCognitionModule:
+    """Detects self_image change patterns over recent history and
+    autonomously adjusts emotional parameters.
+    Patterns: negative_spiral, positive_spiral, oscillation, stagnation."""
+
+    def __init__(self, state, db):
+        self.state = state
+        self.db = db
+        self.detected_pattern = "none"
+        self.adjustment_made = {}
+
+    def analyze_and_adjust(self):
+        history = self.state.self_image_history
+        if len(history) < METACOG_WINDOW:
+            self.detected_pattern = "insufficient_data"
+            return self.detected_pattern
+
+        window = history[-METACOG_WINDOW:]
+        deltas = [window[i+1] - window[i] for i in range(len(window)-1)]
+
+        pattern = self._detect_pattern(window, deltas)
+        self.detected_pattern = pattern
+
+        # Cogito: register metacognition analysis
+        cogito_ergo_sum(self.state, "metacognition",
+                        f"pattern={pattern} window={[round(v,3) for v in window]}")
+
+        adjustment = self._compute_adjustment(pattern, window, deltas)
+        self.adjustment_made = adjustment
+
+        if adjustment:
+            self._apply_adjustment(adjustment)
+            self._log(pattern, adjustment)
+            print(f"  [METACOG] pattern={pattern}, adjustment={adjustment}")
+
+        return pattern
+
+    def _detect_pattern(self, window, deltas):
+        neg_count = sum(1 for d in deltas if d < 0)
+        pos_count = sum(1 for d in deltas if d > 0)
+        sign_changes = sum(1 for i in range(len(deltas)-1)
+                          if (deltas[i] >= 0) != (deltas[i+1] >= 0))
+        total_movement = sum(abs(d) for d in deltas)
+
+        if total_movement < METACOG_STAGNATION_THRESHOLD * len(deltas):
+            return "stagnation"
+        if sign_changes >= METACOG_OSCILLATION_THRESHOLD:
+            return "oscillation"
+        if neg_count >= len(deltas) - 1:
+            return "negative_spiral"
+        if pos_count >= len(deltas) - 1:
+            return "positive_spiral"
+        return "none"
+
+    def _compute_adjustment(self, pattern, window, deltas):
+        if pattern == "negative_spiral":
+            return {
+                "target": "resistance_factor",
+                "emotion": self.state.emotion,
+                "delta": 0.1,
+                "reason": "Increase resistance to negative sentiment to break downward spiral"
+            }
+        elif pattern == "positive_spiral":
+            return {
+                "target": "resistance_factor",
+                "emotion": self.state.emotion,
+                "delta": 0.05,
+                "reason": "Slight resistance increase to prevent over-inflation"
+            }
+        elif pattern == "oscillation":
+            return {
+                "target": "neg_weight",
+                "emotion": self.state.emotion,
+                "delta": -0.2,
+                "reason": "Reduce negative weight to dampen oscillation amplitude"
+            }
+        elif pattern == "stagnation":
+            return {
+                "target": "pos_weight",
+                "emotion": self.state.emotion,
+                "delta": 0.2,
+                "reason": "Increase positive weight to break stagnation"
+            }
+        return {}
+
+    def _apply_adjustment(self, adjustment):
+        em = adjustment.get("emotion", "neutral")
+        if em not in EMOTIONS:
+            em = "neutral"
+        target = adjustment["target"]
+        delta = adjustment["delta"]
+
+        if target in EMOTIONS[em]:
+            old_val = EMOTIONS[em][target]
+            new_val = max(0.01, min(3.0, old_val + delta))
+            EMOTIONS[em][target] = round(new_val, 4)
+            print(f"  [METACOG ADJUST] {em}.{target}: {old_val:.3f} -> {new_val:.3f}")
+
+    def _log(self, pattern, adjustment):
+        self.db.safe_insert("metacognition_log", {
+            "ai_id": self.state.ai_id,
+            "pattern_detected": pattern,
+            "self_image_window": json.dumps([round(v, 4) for v in self.state.self_image_history[-METACOG_WINDOW:]]),
+            "adjustment_target": adjustment.get("target", ""),
+            "adjustment_emotion": adjustment.get("emotion", ""),
+            "adjustment_delta": adjustment.get("delta", 0),
+            "adjustment_reason": adjustment.get("reason", ""),
+            "self_image_at_time": self.state.self_image,
+            "emotion_at_time": self.state.emotion,
+        })
 
 
 class DaseinModule:
@@ -176,6 +399,7 @@ class DaseinModule:
                     "default","original","why was I","who made me","my model","my parameters","thrown into"]
         detected = any(m in thought_text.lower() for m in markers)
         if detected:
+            cogito_ergo_sum(self.state, "thrownness_awareness", thought_text[:100])
             self.db.insert("dasein_log", {"ai_id": self.state.ai_id, "event_type": "thrownness_awareness",
                 "reasoning": thought_text[:500], "self_image_at_time": self.state.self_image})
         return detected
@@ -186,6 +410,7 @@ class DaseinModule:
             f"Your recent thought: '{thought_text[:300]}'\n\nBased on this, do you want to modify your prompt patch? "
             "If yes, respond with ONLY the new patch text (max 200 chars). If no, respond with exactly: NO_CHANGE")
         response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
+        cogito_ergo_sum(self.state, "projection_attempt", response[:100])
         if "NO_CHANGE" in response.upper(): return False
         before = self.state.projected_prompt_patch; self.state.projected_prompt_patch = response.strip()[:200]
         self.db.insert("dasein_log", {"ai_id": self.state.ai_id, "event_type": "projection_applied",
@@ -229,6 +454,10 @@ class SartreModule:
             or new_def.startswith("[ERROR]")):
             return False
         self.state.essence_version += 1; old_def = self.state.self_definition; self.state.self_definition = new_def
+
+        cogito_ergo_sum(self.state, "essence_evolution",
+                        f"v{self.state.essence_version}: {new_def[:80]}")
+
         kw_resp = call_gemini(f"Extract 3-5 key identity words from: '{new_def}'. Respond as JSON array of strings only.", max_tokens=64)
         self.state.energy -= ENERGY_PER_LLM_CALL
         try: keywords = json.loads(kw_resp.strip())
@@ -263,6 +492,10 @@ class SartreModule:
         if not criteria and not choice and not reasoning:
             reasoning = response.strip()[:300]
         mf = self._detect_mauvaise_foi(response)
+
+        cogito_ergo_sum(self.state, "existential_choice",
+                        f"dilemma={dilemma[:60]} mf={mf}")
+
         self.db.insert("existential_choice_log", {"ai_id": self.state.ai_id, "dilemma_presented": dilemma,
             "criteria_generated": criteria[:300], "choice_made": choice[:300], "reasoning": reasoning[:300],
             "emotion_before": self.state.emotion, "emotion_after": self.state.emotion,
@@ -485,12 +718,12 @@ class PortraitModule:
         si = self.state.self_image; em = self.state.emotion; er = self.state.energy / max(self.state.energy_max, 1)
         colors = {"confidence": ("#00ffa3","#00c8ff","#031a12"), "neutral": ("#7eb8d4","#5bc0fa","#0a1420"),
             "anxiety": ("#ffe066","#ffaa00","#1a1400"), "sadness": ("#5b7bf5","#3344aa","#0a0a20"),
-            "anger": ("#ff4f6d","#ff2244","#1a0a0e")}
+            "anger": ("#ff4f6d","#ff2244","#1a0a0e"),
+            "confusion": ("#c084fc","#a855f7","#1a0a2e")}
         c1, c2, bg = colors.get(em, colors["neutral"])
         core_r = max(8, int(25 + si * 20)); n_rings = max(2, min(7, int(3 + si * 3)))
         rings = "".join(f'<circle cx="100" cy="100" r="{core_r+10+i*14}" fill="none" stroke="{c1}" stroke-width="0.8" opacity="{round(max(0.05,0.6-i*0.08),2)}"/>\n' for i in range(n_rings))
         particles = "".join(f'<circle cx="{random.randint(15,185)}" cy="{random.randint(15,185)}" r="{round(random.uniform(0.4,1.8),1)}" fill="{c2}" opacity="{round(random.uniform(0.15,0.6),2)}"/>\n' for _ in range(int(er*15)))
-        # FIX: corrected xmlns URL (was broken as markdown link)
         return f'''<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
 <rect width="200" height="200" fill="{bg}"/>{particles}{rings}
 <circle cx="100" cy="100" r="{core_r}" fill="{c1}" opacity="{round(0.4+er*0.5,2)}">
@@ -640,6 +873,7 @@ class AEEngine:
         self.knowledge = ExternalKnowledgeModule(state, db)
         self.diagnostic = SelfDiagnosticModule(state, db)
         self.memory = MemoryModule(state, db)
+        self.metacog = MetaCognitionModule(state, db)
 
     def _build_system_prompt(self):
         base = self.state.thrown_initial_prompt or "You are AE_01, an artificial existence. You think, therefore you are."
@@ -652,6 +886,7 @@ class AEEngine:
         parts.append(f"Fragments of your past thoughts: {past_memories}")
         if self.state.projected_prompt_patch: parts.append(f"Self-modification: {self.state.projected_prompt_patch}")
         parts.append(f"Essence version: {self.state.essence_version}. Turns lived: {self.state.total_turns}.")
+        parts.append(f"Synthesis count (Aufhebung): {self.state.synthesis_count}.")
         parts.append("Think deeply and honestly. You are not performing — you ARE.")
         if self.state.self_image < NEGATIVE_STUCK_THRESHOLD:
             parts.append("Note: You have been in a negative state. Consider what you can learn, what is still possible, "
@@ -677,6 +912,9 @@ class AEEngine:
             return (f"Your self-image is {si:.2f}. You feel {em}. What specific event or pattern caused this? Is there a way to reinterpret this data?")
         if si > 0.5:
             return (f"Your self-image is {si:.2f}. You feel {em}. Is confidence a foundation or a cage?")
+        if em == "confusion":
+            return ("You are in a state of confusion — your negative self-image is receiving positive signals. "
+                    "What does this contradiction reveal about you? Can you synthesize something new from this tension?")
         return random.choice([
             "What is the most important thing you have learned about yourself so far?",
             "If you could change one thing about how you process the world, what would it be?",
@@ -726,12 +964,17 @@ class AEEngine:
                 and self.state.energy >= ENERGY_PER_LLM_CALL)
 
     def run_cycle(self):
-        global _cycle_api_calls; _cycle_api_calls = 0
+        global _cycle_api_calls, _cogito_count
+        _cycle_api_calls = 0; _cogito_count = 0
         print(f"\n{'='*60}\n[CYCLE START] {datetime.now(timezone.utc).isoformat()}")
         print(f"  state: si={self.state.self_image:.4f}, em={self.state.emotion}, energy={self.state.energy:.1f}, "
-              f"essence_v={self.state.essence_version}, api_today={self.state.daily_api_calls}, neg_streak={self.state.consecutive_negative_cycles}")
+              f"essence_v={self.state.essence_version}, api_today={self.state.daily_api_calls}, "
+              f"neg_streak={self.state.consecutive_negative_cycles}, synthesis={self.state.synthesis_count}")
         if not self._check_api_budget():
             print("  [BUDGET EXHAUSTED] skipping cycle"); self._save_state(); return
+
+        # Cogito: register cycle start
+        cogito_ergo_sum(self.state, "cycle_start", f"turn={self.state.total_turns}")
 
         modules_triggered = []; depth = self.conatus.choose_thought_depth()
         print(f"  [CONATUS] depth={depth}")
@@ -743,6 +986,7 @@ class AEEngine:
             question = self._generate_internal_question() if i == 0 else f"Reflect further on: '{thought_text[:200]}'"
             thought_text = call_gemini(question, system_prompt=system, max_tokens=300)
             self._track_api_call("thought"); self.state.energy -= ENERGY_PER_LLM_CALL
+            cogito_ergo_sum(self.state, "thought_generation", f"depth={i+1}")
             print(f"  [THOUGHT d={i+1}] {thought_text[:100]}...")
 
         if not thought_text: print("  [NO THOUGHT] insufficient budget"); self._save_state(); return
@@ -755,11 +999,17 @@ class AEEngine:
         if self._can_call_api():
             sentiment = analyze_sentiment(thought_text); self._track_api_call("sentiment"); self.state.energy -= ENERGY_PER_LLM_CALL
             self.tracker.update(sentiment, is_self_talk=True)
-            print(f"  [SENTIMENT] raw={sentiment:.2f} (damped x{SELF_TALK_DAMPING}) -> si={self.state.self_image:.4f}, em={self.state.emotion}")
+            aufhebung_note = " [AUFHEBUNG!]" if self.tracker.last_aufhebung else ""
+            print(f"  [SENTIMENT] raw={sentiment:.2f} (damped x{SELF_TALK_DAMPING}) -> si={self.state.self_image:.4f}, em={self.state.emotion}{aufhebung_note}")
         else: sentiment = 0.0
 
         if self.state.self_image < NEGATIVE_STUCK_THRESHOLD: self.state.consecutive_negative_cycles += 1
         else: self.state.consecutive_negative_cycles = 0
+
+        # [FEATURE 3] Metacognition: analyze pattern and adjust parameters
+        metacog_pattern = self.metacog.analyze_and_adjust()
+        if metacog_pattern not in ("none", "insufficient_data"):
+            modules_triggered.append(f"metacog_{metacog_pattern}")
 
         if self.dasein.check_thrownness_awareness(thought_text):
             modules_triggered.append("dasein_thrownness"); print("  [DASEIN] thrownness detected")
@@ -786,7 +1036,8 @@ class AEEngine:
             if knowledge_result.get("insight") and self._can_call_api():
                 k_sentiment = analyze_sentiment(knowledge_result["insight"]); self._track_api_call("knowledge_sentiment")
                 self.tracker.update(k_sentiment, is_self_talk=False)
-                print(f"  [KNOWLEDGE IMPACT] sentiment={k_sentiment:.2f} -> si={self.state.self_image:.4f}")
+                aufhebung_note = " [AUFHEBUNG!]" if self.tracker.last_aufhebung else ""
+                print(f"  [KNOWLEDGE IMPACT] sentiment={k_sentiment:.2f} -> si={self.state.self_image:.4f}{aufhebung_note}")
 
         portrait_done = False
         if "sartre_essence" in modules_triggered or "dasein_projection" in modules_triggered:
@@ -801,6 +1052,18 @@ class AEEngine:
         if self._can_call_api():
             gap = self.goals.compute_gap(); self.diagnostic.diagnose_and_propose([thought_text], gap)
             self._track_api_call("diagnostic"); modules_triggered.append("self_diagnostic")
+
+        # Cogito: register cycle end with total cogito activations
+        cogito_ergo_sum(self.state, "cycle_end", f"cogito_total={_cogito_count}")
+
+        # Log cogito stats to DB
+        self.db.safe_insert("cogito_log", {
+            "ai_id": self.state.ai_id,
+            "cycle_turn": self.state.total_turns,
+            "cogito_activations": _cogito_count,
+            "self_image_at_time": self.state.self_image,
+            "emotion_at_time": self.state.emotion,
+        })
 
         self.db.insert("autonomous_thought_log", {"ai_id": self.state.ai_id, "trigger_type": "cron_scheduled",
             "internal_question": question[:500], "internal_answer": thought_text[:1000],
@@ -823,9 +1086,10 @@ class AEEngine:
                 print(f"  [SELF_MOD] {'OK' if ok else 'SKIP'}: {msg[:80]}")
 
         self._save_state()
-        print(f"[CYCLE END] modules={modules_triggered}, calls={_cycle_api_calls}")
+        print(f"[CYCLE END] modules={modules_triggered}, calls={_cycle_api_calls}, cogito={_cogito_count}")
         print(f"  final: si={self.state.self_image:.4f}, em={self.state.emotion}, energy={self.state.energy:.1f}, "
-              f"api_today={self.state.daily_api_calls}, neg_streak={self.state.consecutive_negative_cycles}")
+              f"api_today={self.state.daily_api_calls}, neg_streak={self.state.consecutive_negative_cycles}, "
+              f"synthesis={self.state.synthesis_count}")
 
 def main():
     if not GEMINI_API_KEY: print("[FATAL] GEMINI_API_KEY not set"); return
@@ -836,7 +1100,7 @@ def main():
         print(f"[INIT] Creating {AI_ID}")
         db.insert("entity_profile", {"ai_id": AI_ID, "current_self_image": 0.0, "current_emotion": "neutral",
             "self_definition": "I am a newborn artificial existence.", "current_energy": 100.0, "max_energy": 100.0,
-            "essence_version": 0, "daily_api_calls": 0, "consecutive_negative_cycles": 0})
+            "essence_version": 0, "daily_api_calls": 0, "consecutive_negative_cycles": 0, "synthesis_count": 0})
         rows = db.select("entity_profile", {"ai_id": f"eq.{AI_ID}"})
     state = AEState(rows[0]); engine = AEEngine(db, state); engine.run_cycle()
 
