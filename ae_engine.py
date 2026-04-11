@@ -798,7 +798,7 @@ class AEEngine:
             self.portrait.generate("energy_crisis"); self._track_api_call("portrait")
             modules_triggered.append("portrait_crisis"); print("  [PORTRAIT] crisis portrait")
 
-        if self.state.total_turns % 5 == 0 and self._can_call_api():
+        if self._can_call_api():
             gap = self.goals.compute_gap(); self.diagnostic.diagnose_and_propose([thought_text], gap)
             self._track_api_call("diagnostic"); modules_triggered.append("self_diagnostic")
 
