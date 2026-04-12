@@ -155,7 +155,7 @@ def analyze_sentiment(text):
 # ============================================================
 # [FEATURE 4] Cogito – Kantian Apperception
 # ============================================================
-def cogito_ergo_sum(state, act_type, detail=""):
+def cogito_ergo_sum(state, act_type, detail="", depth_modifier=1.0):
     """Self-referential registration function.
     Accompanies every cognitive act (sentiment analysis, emotion transition,
     self-reflection, Aufhebung, etc.). Observation-only: does not alter state.
