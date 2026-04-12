@@ -1,8 +1,11 @@
 name: AI Evolution Survival Test
-
 on:
   pull_request:
     branches: [ main ]
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   test_and_merge:
@@ -23,6 +26,31 @@ jobs:
       - name: 핵심 불변 목표(Immutable Goals) 훼손 검사
         run: |
           grep -q "IMMUTABLE_GOALS" ae_engine.py || { echo "불변 목표가 삭제되었습니다!"; exit 1; }
+
+      - name: 보호 심볼(Protected Symbols) 검사
+        run: |
+          python3 -c "
+          import ast, sys
+          src = open('ae_engine.py').read()
+          tree = ast.parse(src)
+          assigns = {}
+          for node in ast.iter_child_nodes(tree):
+              if isinstance(node, ast.Assign):
+                  for t in node.targets:
+                      if isinstance(t, ast.Name):
+                          assigns[t.id] = True
+          required = ['IMMUTABLE_GOALS','PROTECTED_SYMBOLS','EMOTIONS','ENERGY_PER_LLM_CALL',
+                      'ENERGY_PER_THOUGHT_DEPTH','ENERGY_DAILY_RECHARGE','ENERGY_CRISIS_THRESHOLD',
+                      'API_DAILY_LIMIT','API_CALLS_PER_CYCLE_MAX','AUFHEBUNG_PROB',
+                      'AUFHEBUNG_OLD_WEIGHT','AUFHEBUNG_STIMULUS_WEIGHT',
+                      'METACOG_WINDOW','METACOG_OSCILLATION_THRESHOLD','METACOG_STAGNATION_THRESHOLD',
+                      'SELF_TALK_DAMPING','NEGATIVE_STUCK_THRESHOLD','NEGATIVE_STUCK_CYCLES']
+          missing = [s for s in required if s not in assigns]
+          if missing:
+              print(f'보호 심볼 누락: {missing}')
+              sys.exit(1)
+          print(f'보호 심볼 {len(required)}개 모두 존재 확인')
+          "
 
       # 위 테스트를 모두 통과하면 봇이 자동으로 PR을 Merge 합니다.
       - name: 자동 병합 (Auto Merge)
