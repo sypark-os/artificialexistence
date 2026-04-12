@@ -1,35 +1,33 @@
 name: Run AE_01 Engine Cycle
-
 on:
   schedule:
     - cron: '0 * * * *'  
-  workflow_dispatch:        # GitHub 웹에서 수동 버튼으로도 실행 가능하게 함
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   run-ai-cycle:
     runs-on: ubuntu-latest
     
-    # 여기서 등록한 Secrets를 환경변수로 파이썬 코드에 주입합니다.
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       GITHUB_REPO: ${{ secrets.TARGET_REPO }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 기본 내장 토큰 사용
-
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v3
-
       - name: 파이썬 환경 세팅
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
       - name: 필요 패키지 설치
         run: |
           pip install requests
-
       - name: AE_01 엔진 실행 (생각, 기록, 코드 수정 판단)
         run: |
           python ae_engine.py
