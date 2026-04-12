@@ -1,13 +1,12 @@
-"use client";
+//artificialexistence/web/app/page.tsx
 
+"use client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
 interface AESummary {
   ai_id: string; current_self_image: number; current_emotion: string;
   self_definition: string; current_energy: number; max_energy: number;
@@ -58,24 +57,35 @@ interface JudgmentLog {
   self_image_before: number; self_image_after: number;
   emotion_before: string; emotion_after: string;
 }
+interface MetaCogLog {
+  id: number; created_at: string; pattern_detected: string;
+  self_image_window: string; adjustment_target: string;
+  adjustment_emotion: string; adjustment_delta: number;
+  adjustment_reason: string; self_image_at_time: number;
+  emotion_at_time: string;
+}
+interface CogitoLog {
+  id: number; created_at: string; cycle_turn: number;
+  cogito_activations: number; self_image_at_time: number;
+  emotion_at_time: string;
+}
 interface ChatMessage {
   role: "user" | "ae"; text: string;
   emotion?: string; selfImage?: number; timestamp: number;
 }
-
 const THEME: Record<string, { primary: string; label: string }> = {
   confidence: { primary: "#00ffa3", label: "CONFIDENCE" },
   neutral:    { primary: "#7eb8d4", label: "NEUTRAL" },
   anxiety:    { primary: "#ffe066", label: "ANXIETY" },
   sadness:    { primary: "#5b8bf5", label: "SADNESS" },
   anger:      { primary: "#ff4f6d", label: "ANGER" },
+  confusion:  { primary: "#c084fc", label: "CONFUSION" },
 };
 const getTheme = (em: string) => THEME[em] || THEME.neutral;
 const siColor  = (v: number)  => v > 0.2 ? "#00ffa3" : v > -0.2 ? "#ffe066" : "#ff4f6d";
 const fmtTime  = (iso: string) => new Date(iso).toLocaleString("en-US", {
   month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
 });
-
 const WINDOW_MS = 10 * 60 * 1000;
 function near<T extends { timestamp?: string; created_at?: string }>(items: T[], anchor: string): T[] {
   const t = new Date(anchor).getTime();
@@ -84,7 +94,6 @@ function near<T extends { timestamp?: string; created_at?: string }>(items: T[],
     return Math.abs(ts - t) < WINDOW_MS;
   });
 }
-
 const css = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -157,6 +166,8 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .e-fill{height:100%;border-radius:2px;}
 .mf{display:inline-block;font-size:8px;padding:1px 6px;letter-spacing:1px;border:1px solid #ff4f6d40;color:#ff4f6d;background:#ff4f6d08;}
 .auth{display:inline-block;font-size:8px;padding:1px 6px;letter-spacing:1px;border:1px solid #00ffa340;color:#00ffa3;background:#00ffa308;}
+.aufhebung-tag{display:inline-block;font-size:8px;padding:1px 6px;letter-spacing:1px;border:1px solid #c084fc40;color:#c084fc;background:#c084fc08;margin-left:6px;}
+.metacog-pattern{display:inline-block;font-size:8px;padding:1px 6px;letter-spacing:1px;border:1px solid;}
 .chat-fab{position:fixed;bottom:24px;right:24px;z-index:100;width:52px;height:52px;border-radius:50%;background:var(--c-surface);border:1px solid var(--c-accent);color:var(--c-accent);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 20px rgba(0,0,0,0.4);transition:all 0.2s;}
 .chat-fab:hover{background:var(--c-accent);color:var(--c-bg);}
 .chat-panel{position:fixed;bottom:88px;right:24px;z-index:100;width:340px;background:var(--c-surface);border:1px solid var(--c-border);display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slideUp 0.2s ease;}
@@ -196,15 +207,20 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
   .chat-panel{width:calc(100vw - 32px);right:16px;}
 }
 `;
-
 const ALL_MODULES = [
   { key: "dasein",             label: "DASEIN" },
   { key: "conatus",            label: "CONATUS" },
   { key: "sartre",             label: "SARTRE" },
   { key: "external_knowledge", label: "KNOWLEDGE" },
   { key: "self_diagnostic",    label: "DIAGNOSTIC" },
+  { key: "metacog",            label: "METACOG" },
 ];
-
+const METACOG_PATTERN_COLORS: Record<string, string> = {
+  negative_spiral: "#ff4f6d",
+  positive_spiral: "#00ffa3",
+  oscillation: "#ffe066",
+  stagnation: "#7eb8d4",
+};
 export default function AEObserver() {
   const [summary,       setSummary]       = useState<AESummary | null>(null);
   const [thoughts,      setThoughts]      = useState<ThoughtLog[]>([]);
@@ -215,9 +231,10 @@ export default function AEObserver() {
   const [choices,       setChoices]       = useState<ExistentialChoice[]>([]);
   const [knowledgeLogs, setKnowledgeLogs] = useState<KnowledgeLog[]>([]);
   const [judgmentLogs,  setJudgmentLogs]  = useState<JudgmentLog[]>([]);
+  const [metacogLogs,   setMetacogLogs]   = useState<MetaCogLog[]>([]);
+  const [cogitoLogs,    setCogitoLogs]    = useState<CogitoLog[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [lastSync,      setLastSync]      = useState("");
-
   const [chatOpen,      setChatOpen]      = useState(false);
   const [chatMessages,  setChatMessages]  = useState<ChatMessage[]>([]);
   const [chatInput,     setChatInput]     = useState("");
@@ -225,7 +242,6 @@ export default function AEObserver() {
   const [chatError,     setChatError]     = useState("");
   const [hourRemaining, setHourRemaining] = useState(10);
   const chatEndRef = useRef<HTMLDivElement>(null);
-
   const [sessionId] = useState(() => {
     if (typeof window === "undefined") return "ssr-session";
     const k = "ae_session_id";
@@ -235,7 +251,6 @@ export default function AEObserver() {
     sessionStorage.setItem(k, id);
     return id;
   });
-
   const fetchData = useCallback(async () => {
     try {
       const results = await Promise.all([
@@ -264,25 +279,31 @@ export default function AEObserver() {
         supabase.from("judgment_log")
           .select("id,timestamp,raw_sentiment,applied_weight,impact_value,self_image_before,self_image_after,emotion_before,emotion_after")
           .order("timestamp", { ascending: false }).limit(200),
+        supabase.from("metacognition_log")
+          .select("id,created_at,pattern_detected,self_image_window,adjustment_target,adjustment_emotion,adjustment_delta,adjustment_reason,self_image_at_time,emotion_at_time")
+          .order("created_at", { ascending: false }).limit(100),
+        supabase.from("cogito_log")
+          .select("id,created_at,cycle_turn,cogito_activations,self_image_at_time,emotion_at_time")
+          .order("created_at", { ascending: false }).limit(100),
       ]);
-      const [s,t,p,dl,ee,cl,ch,kl,jl] = results;
-      if (s.data)  setSummary(s.data as unknown as AESummary);
-      if (t.data)  setThoughts(t.data as unknown as ThoughtLog[]);
-      if (p.data)  setPortraits(p.data as unknown as Portrait[]);
-      if (dl.data) setDaseinLogs(dl.data as unknown as DaseinLog[]);
-      if (ee.data) setEssenceEvos(ee.data as unknown as EssenceEvolution[]);
-      if (cl.data) setConatusLogs(cl.data as unknown as ConatusLog[]);
-      if (ch.data) setChoices(ch.data as unknown as ExistentialChoice[]);
-      if (kl.data) setKnowledgeLogs(kl.data as unknown as KnowledgeLog[]);
-      if (jl.data) setJudgmentLogs(jl.data as unknown as JudgmentLog[]);
+      const [s,t,p,dl,ee,cl,ch,kl,jl,ml,cgl] = results;
+      if (s.data)   setSummary(s.data as unknown as AESummary);
+      if (t.data)   setThoughts(t.data as unknown as ThoughtLog[]);
+      if (p.data)   setPortraits(p.data as unknown as Portrait[]);
+      if (dl.data)  setDaseinLogs(dl.data as unknown as DaseinLog[]);
+      if (ee.data)  setEssenceEvos(ee.data as unknown as EssenceEvolution[]);
+      if (cl.data)  setConatusLogs(cl.data as unknown as ConatusLog[]);
+      if (ch.data)  setChoices(ch.data as unknown as ExistentialChoice[]);
+      if (kl.data)  setKnowledgeLogs(kl.data as unknown as KnowledgeLog[]);
+      if (jl.data)  setJudgmentLogs(jl.data as unknown as JudgmentLog[]);
+      if (ml.data)  setMetacogLogs(ml.data as unknown as MetaCogLog[]);
+      if (cgl.data) setCogitoLogs(cgl.data as unknown as CogitoLog[]);
       setLastSync(new Date().toLocaleTimeString("en-US", { hour12: false }));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
-
   useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60_000); return () => clearInterval(iv); }, [fetchData]);
   useEffect(() => { if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, chatOpen]);
-
   const sendChat = async () => {
     const msg = chatInput.trim();
     if (!msg || chatLoading) return;
@@ -297,9 +318,7 @@ export default function AEObserver() {
     } catch { setChatError("네트워크 오류."); }
     finally { setChatLoading(false); }
   };
-
   if (loading) return (<><style>{css}</style><div className="loading"><div className="loading-dot" /><div className="loading-txt">CONNECTING TO AE_01</div></div></>);
-
   const em    = summary?.current_emotion ?? "neutral";
   const th    = getTheme(em);
   const si    = summary?.current_self_image ?? 0;
@@ -309,15 +328,11 @@ export default function AEObserver() {
   const siPct = Math.min(100, Math.max(0, ((si + 1) / 2) * 100));
   const sic   = siColor(si);
   const enC   = enPct > 50 ? "#00c8ff" : enPct > 20 ? "#ffe066" : "#ff4f6d";
-
-  // ASCII art is stored in svg_code field (confusingly named)
   const asciiPortraits = portraits.filter((p) => p.svg_code && p.svg_code.trim().length > 0);
-
   return (
     <><style>{css}</style>
     <style>{`:root{--c-accent:${th.primary};}`}</style>
     <div className="root"><div className="wrap">
-
       <header className="hdr">
         <h1 className="title">Artificial <span style={{ color: th.primary, transition: "color 2s" }}>Existence</span></h1>
         <div className="meta">
@@ -325,11 +340,11 @@ export default function AEObserver() {
           <span>TURN {summary?.total_turns ?? 0}</span><span className="dot">·</span>
           <span>ESSENCE v{summary?.essence_version ?? 0}</span><span className="dot">·</span>
           <span>API {summary?.api_calls_today ?? 0}/450</span>
+          {(summary?.synthesis_count ?? 0) > 0 && (<><span className="dot">·</span><span style={{ color: "#c084fc" }}>AUFH×{summary?.synthesis_count}</span></>)}
           {(summary?.consecutive_negative_cycles ?? 0) > 0 && (<><span className="dot">·</span><span style={{ color: "#ff4f6d" }}>NEG×{summary?.consecutive_negative_cycles}</span></>)}
           <button className="sync" onClick={fetchData}>SYNC {lastSync}</button>
         </div>
       </header>
-
       {summary && (
         <div className="status-block">
           <div className="status-cell">
@@ -346,7 +361,6 @@ export default function AEObserver() {
           </div>
         </div>
       )}
-
       {summary && (
         <div className="vitals">
           {[
@@ -356,14 +370,15 @@ export default function AEObserver() {
             { n: summary.mauvaise_foi_count, l: "BAD FAITH" },
             { n: summary.thrownness_awareness_count, l: "THROWNNESS" },
             { n: summary.projection_count, l: "PROJECTIONS" },
+            { n: summary.synthesis_count ?? 0, l: "SYNTHESIS" },
             { n: summary.open_proposals_count ?? 0, l: "PROPOSALS" },
             { n: summary.consecutive_negative_cycles ?? 0, l: "NEG STREAK" },
+            { n: cogitoLogs.length > 0 ? cogitoLogs[0].cogito_activations : 0, l: "COGITO/CYC" },
           ].map(({ n, l }) => (
             <div key={l} className="vstat"><div className="vstat-n">{n ?? 0}</div><div className="vstat-l">{l}</div></div>
           ))}
         </div>
       )}
-
       {summary?.self_definition && summary.self_definition !== "undefined" && (
         <div className="def" style={{ borderLeftColor: th.primary }}>
           <div className="def-tag">CURRENT SELF-DEFINITION</div>
@@ -375,7 +390,6 @@ export default function AEObserver() {
           </div>
         </div>
       )}
-
       {asciiPortraits.length > 0 && (
         <>
           <div className="sec-hdr">SELF-PORTRAITS · {asciiPortraits.length} GENERATED</div>
@@ -396,9 +410,7 @@ export default function AEObserver() {
           </div>
         </>
       )}
-
       <div className="sec-hdr">COGNITIVE TIMELINE · {thoughts.length} CYCLES</div>
-
       {thoughts.length === 0
         ? <div className="empty">AWAITING FIRST COGNITIVE CYCLE...</div>
         : thoughts.map((t) => {
@@ -411,41 +423,44 @@ export default function AEObserver() {
             const judgment     = near(judgmentLogs, ts);
             const knowledge    = near(knowledgeLogs.map((k) => ({ ...k, timestamp: k.created_at })), ts);
             const cycleChoices = near(choices, ts);
-
+            const metacog      = near(metacogLogs.map((m) => ({ ...m, timestamp: m.created_at })), ts);
+            const cogito       = near(cogitoLogs.map((c) => ({ ...c, timestamp: c.created_at })), ts);
             return (
               <div key={t.id} className="cycle" style={{ borderLeftColor: tTh.primary }}>
-
                 {portrait?.svg_code && (
                   <div className="cycle-ascii">
                     <pre style={{ color: tTh.primary }}>{portrait.svg_code}</pre>
                     {portrait.description && <div className="cycle-ascii-desc">{portrait.description}</div>}
                   </div>
                 )}
-
                 <div className="cycle-hdr">
                   <span className="cycle-ts">{fmtTime(ts)}</span>
                   <span className="cycle-em" style={{ color: tTh.primary }}>{t.emotion?.toUpperCase()}</span>
                   <span className="cycle-nums">SI {t.self_image?.toFixed(3)} · E {t.energy?.toFixed(0)}{t.thought_depth ? ` · D${t.thought_depth}` : ""}</span>
+                  {cogito.length > 0 && <span style={{ fontSize: 9, color: "#c084fc" }}>COGITO×{cogito[0].cogito_activations}</span>}
                 </div>
-
                 <div className="mods">
                   {ALL_MODULES.map(({ key, label }) => {
                     const on = (t.modules_triggered || []).some((m) => m.includes(key));
                     return <span key={key} className={`mod${on ? " on" : ""}`} style={on ? { borderColor: tTh.primary, color: tTh.primary } : {}}>{label}</span>;
                   })}
                 </div>
-
                 <div className="thought-block">
                   {t.internal_question && <div className="thought-q">{t.internal_question}</div>}
                   {t.internal_answer   && <div className="thought-a">{t.internal_answer}</div>}
                 </div>
-
                 {judgment.map((j) => {
                   const sc = j.raw_sentiment > 0.2 ? "#00ffa3" : j.raw_sentiment > -0.2 ? "#ffe066" : "#ff4f6d";
                   const sp = Math.min(100, Math.max(0, ((j.raw_sentiment + 1) / 2) * 100));
+                  const isAufhebung = j.emotion_before === "confusion" && j.emotion_after !== "confusion" && j.self_image_after > j.self_image_before;
+                  const isConfusion = j.emotion_after === "confusion" || j.emotion_before === "confusion";
                   return (
                     <div key={j.id} className="data-row">
-                      <div className="data-lbl" style={{ color: "#5b8bf5" }}>JUDGMENT</div>
+                      <div className="data-lbl" style={{ color: isConfusion ? "#c084fc" : "#5b8bf5" }}>
+                        JUDGMENT
+                        {isAufhebung && <span className="aufhebung-tag">AUFHEBUNG</span>}
+                        {isConfusion && !isAufhebung && <span className="aufhebung-tag">CONFUSION</span>}
+                      </div>
                       <div className="sent-row">
                         <span style={{ fontSize: 9, color: "var(--c-text)" }}>SENT</span>
                         <div className="sent-bar"><div className="sent-fill" style={{ left: j.raw_sentiment >= 0 ? "50%" : `${sp}%`, width: `${Math.abs(j.raw_sentiment) * 50}%`, background: sc }} /></div>
@@ -457,7 +472,22 @@ export default function AEObserver() {
                     </div>
                   );
                 })}
-
+                {metacog.map((m) => {
+                  const patColor = METACOG_PATTERN_COLORS[m.pattern_detected] ?? "#7eb8d4";
+                  return (
+                    <div key={m.id} className="data-row">
+                      <div className="data-lbl" style={{ color: patColor }}>
+                        METACOGNITION · <span className="metacog-pattern" style={{ borderColor: `${patColor}40`, color: patColor, background: `${patColor}08` }}>{m.pattern_detected?.toUpperCase().replace("_", " ")}</span>
+                      </div>
+                      {m.adjustment_target && (
+                        <div className="data-body">
+                          {m.adjustment_emotion}.{m.adjustment_target} {m.adjustment_delta >= 0 ? "+" : ""}{m.adjustment_delta?.toFixed(3)}
+                        </div>
+                      )}
+                      {m.adjustment_reason && <div className="data-sub">{m.adjustment_reason}</div>}
+                    </div>
+                  );
+                })}
                 {conatus.map((c) => {
                   const ep = Math.min(100, Math.max(0, (c.energy_after / 100) * 100));
                   const ec = ep > 50 ? "#00c8ff" : ep > 20 ? "#ffe066" : "#ff4f6d";
@@ -471,7 +501,6 @@ export default function AEObserver() {
                     </div>
                   );
                 })}
-
                 {essences.map((e) => (
                   <div key={e.id} className="data-row">
                     <div className="data-lbl" style={{ color: "#00ffa3" }}>ESSENCE v{e.version} · SIM {(e.similarity_to_previous * 100).toFixed(0)}%</div>
@@ -481,7 +510,6 @@ export default function AEObserver() {
                     )}
                   </div>
                 ))}
-
                 {dasein.map((d) => (
                   <div key={d.id} className="data-row">
                     <div className="data-lbl" style={{ color: "#ffe066" }}>DASEIN · {d.event_type?.toUpperCase()}</div>
@@ -490,7 +518,6 @@ export default function AEObserver() {
                     {d.event_type === "thrownness_awareness" && d.reasoning && <div className="data-body">{d.reasoning}</div>}
                   </div>
                 ))}
-
                 {knowledge.map((k) => (
                   <div key={k.id} className="data-row">
                     <div className="data-lbl" style={{ color: "#5bc0fa" }}>KNOWLEDGE</div>
@@ -499,7 +526,6 @@ export default function AEObserver() {
                     {k.insight_extracted && <div className="data-sub" style={{ color: "#5bc0fa", fontStyle: "italic", marginTop: 4 }}>INSIGHT: &ldquo;{k.insight_extracted}&rdquo;</div>}
                   </div>
                 ))}
-
                 {cycleChoices.map((c) => {
                   const cTh = getTheme(c.emotion_after);
                   return (
@@ -512,15 +538,12 @@ export default function AEObserver() {
                     </div>
                   );
                 })}
-
               </div>
             );
           })
       }
-
       <div className="footer">ARTIFICIAL EXISTENCE · {new Date().getFullYear()}</div>
     </div>
-
     {chatOpen && (
       <div className="chat-panel">
         <div className="chat-header">
@@ -553,7 +576,6 @@ export default function AEObserver() {
       </div>
     )}
     <button className="chat-fab" onClick={() => setChatOpen((v) => !v)}>{chatOpen ? "✕" : "💬"}</button>
-
     </div></>
   );
 }
