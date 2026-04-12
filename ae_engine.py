@@ -964,7 +964,7 @@ class AEEngine:
         try:
             rows = self.db.select("judgment_log", {
                 "ai_id": f"eq.{self.state.ai_id}",
-                "order": "created_at.desc",
+                "order": "timestamp.desc",
                 "limit": str(METACOG_WINDOW * 2),
             })
             if rows and isinstance(rows, list):
