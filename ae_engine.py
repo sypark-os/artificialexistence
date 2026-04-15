@@ -116,7 +116,7 @@ class SupabaseClient:
 _cycle_api_calls = 0
 _cogito_count = 0  # Cogito activation counter per cycle
 
-def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
+def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False, timeout=30):
     global _cycle_api_calls
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     contents = []
