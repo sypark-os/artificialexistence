@@ -129,17 +129,19 @@ body{background:var(--c-bg);color:var(--c-text);font-family:var(--font-m);-webki
 .def-meta{font-size:9px;color:var(--c-text);margin-top:6px;word-break:break-all;}
 .sec-hdr{font-size:9px;color:var(--c-text);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
 .sec-hdr::after{content:'';flex:1;height:1px;background:var(--c-border);}
-.ascii-gallery{display:flex;flex-direction:column;gap:8px;margin-bottom:28px;}
-.ascii-card{background:var(--c-surface);border:1px solid var(--c-border);border-left:3px solid;}
-.ascii-card-header{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--c-border);flex-wrap:wrap;}
-.ascii-card-em{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
-.ascii-card-meta{font-size:9px;color:var(--c-text);}
-.ascii-art{font-family:var(--font-m);font-size:11px;line-height:1.4;padding:12px 16px;white-space:pre;overflow-x:auto;}
-.ascii-desc{font-size:10px;color:var(--c-text);padding:8px 16px 12px;border-top:1px solid var(--c-border);font-style:italic;}
+.portrait-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:28px;}
+.portrait-card{background:var(--c-surface);border:1px solid var(--c-border);border-top:3px solid;display:flex;flex-direction:column;}
+.portrait-svg{width:100%;aspect-ratio:1/1;display:block;background:#000;}
+.portrait-svg svg{width:100%;height:100%;display:block;}
+.portrait-meta{padding:8px 10px;display:flex;flex-direction:column;gap:3px;}
+.portrait-em{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
+.portrait-sub{font-size:9px;color:var(--c-bright);word-break:break-word;}
+.portrait-desc{font-size:9px;color:var(--c-bright);padding:6px 10px;border-top:1px solid var(--c-border);font-style:italic;line-height:1.5;}
 .cycle{background:var(--c-surface);border:1px solid var(--c-border);border-left:3px solid;margin-bottom:16px;overflow:hidden;}
-.cycle-ascii{padding:12px 14px;border-bottom:1px solid var(--c-border);background:#040608;}
-.cycle-ascii pre{font-family:var(--font-m);font-size:10px;line-height:1.35;white-space:pre;overflow-x:auto;}
-.cycle-ascii-desc{font-size:9px;color:var(--c-text);margin-top:6px;font-style:italic;}
+.cycle-portrait{padding:0;border-bottom:1px solid var(--c-border);background:#000;position:relative;}
+.cycle-portrait-svg{width:100%;max-height:280px;aspect-ratio:1/1;display:block;margin:0 auto;}
+.cycle-portrait-svg svg{width:100%;height:100%;display:block;}
+.cycle-portrait-desc{font-size:9px;color:var(--c-bright);padding:8px 14px;font-style:italic;background:var(--c-surface);border-top:1px solid var(--c-border);line-height:1.5;}
 .cycle-hdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px 0;}
 .cycle-ts{font-size:10px;color:var(--c-text);}
 .cycle-em{font-family:var(--font-d);font-size:10px;font-weight:700;letter-spacing:1.5px;}
@@ -328,7 +330,7 @@ export default function AEObserver() {
   const siPct = Math.min(100, Math.max(0, ((si + 1) / 2) * 100));
   const sic   = siColor(si);
   const enC   = enPct > 50 ? "#00c8ff" : enPct > 20 ? "#ffe066" : "#ff4f6d";
-  const asciiPortraits = portraits.filter((p) => p.svg_code && p.svg_code.trim().length > 0);
+const asciiPortraits = portraits.filter((p) => p.svg_code && p.svg_code.trim().startsWith("<svg"));
   return (
     <><style>{css}</style>
     <style>{`:root{--c-accent:${th.primary};}`}</style>
@@ -393,17 +395,18 @@ export default function AEObserver() {
       {asciiPortraits.length > 0 && (
         <>
           <div className="sec-hdr">SELF-PORTRAITS · {asciiPortraits.length} GENERATED</div>
-          <div className="ascii-gallery">
-            {asciiPortraits.slice(0, 5).map((p) => {
+          <div className="portrait-gallery">
+            {asciiPortraits.slice(0, 8).map((p) => {
               const pTh = getTheme(p.emotion_at_time);
               return (
-                <div key={p.id} className="ascii-card" style={{ borderLeftColor: pTh.primary }}>
-                  <div className="ascii-card-header">
-                    <span className="ascii-card-em" style={{ color: pTh.primary }}>{p.emotion_at_time?.toUpperCase()} · v{p.essence_version_at_time}</span>
-                    <span className="ascii-card-meta">SI {p.self_image_at_time?.toFixed(3)} · {fmtTime(p.created_at)} · {p.trigger_reason}</span>
+                <div key={p.id} className="portrait-card" style={{ borderTopColor: pTh.primary }}>
+                  <div className="portrait-svg" dangerouslySetInnerHTML={{ __html: p.svg_code }} />
+                  <div className="portrait-meta">
+                    <span className="portrait-em" style={{ color: pTh.primary }}>{p.emotion_at_time?.toUpperCase()} · v{p.essence_version_at_time}</span>
+                    <span className="portrait-sub">SI {p.self_image_at_time?.toFixed(3)} · {fmtTime(p.created_at)}</span>
+                    <span className="portrait-sub">{p.trigger_reason}</span>
                   </div>
-                  <div className="ascii-art" style={{ color: pTh.primary }}>{p.svg_code}</div>
-                  {p.description && <div className="ascii-desc">{p.description}</div>}
+                  {p.description && <div className="portrait-desc">{p.description}</div>}
                 </div>
               );
             })}
@@ -428,9 +431,9 @@ export default function AEObserver() {
             return (
               <div key={t.id} className="cycle" style={{ borderLeftColor: tTh.primary }}>
                 {portrait?.svg_code && (
-                  <div className="cycle-ascii">
-                    <pre style={{ color: tTh.primary }}>{portrait.svg_code}</pre>
-                    {portrait.description && <div className="cycle-ascii-desc">{portrait.description}</div>}
+                  <div className="cycle-portrait">
+                    <div className="cycle-portrait-svg" dangerouslySetInnerHTML={{ __html: portrait.svg_code }} />
+                    {portrait.description && <div className="cycle-portrait-desc">{portrait.description}</div>}
                   </div>
                 )}
                 <div className="cycle-hdr">
