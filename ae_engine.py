@@ -116,7 +116,9 @@ class SupabaseClient:
 _cycle_api_calls = 0
 _cogito_count = 0  # Cogito activation counter per cycle
 
-def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
+def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False, retries=2):
+    """Gemini 호출. 실패 시 빈 문자열 반환. 호출부는 반드시 빈 문자열을 체크해야 한다.
+    503/timeout은 최대 retries번 재시도. 다른 에러는 즉시 빈 문자열."""
     global _cycle_api_calls
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     contents = []
@@ -131,26 +133,52 @@ def call_gemini(prompt, system_prompt="", max_tokens=512, require_json=False):
 
     data = {"contents": contents, "generationConfig": gen_config}
 
-    try:
-        resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
-        if resp.status_code == 429:
-            print("[RATE LIMIT] waiting 60s..."); time.sleep(60)
+    for attempt in range(retries + 1):
+        try:
             resp = requests.post(url, json=data, timeout=30); _cycle_api_calls += 1
-        if resp.status_code != 200: return f"[API Error: {resp.status_code}] {resp.text[:200]}"
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e: return f"[ERROR] {e}"
-
+            if resp.status_code == 200:
+                try:
+                    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                    return text if text else ""
+                except (KeyError, IndexError, ValueError):
+                    print("  [GEMINI] empty or malformed response")
+                    return ""
+            if resp.status_code == 429:
+                print(f"  [GEMINI] 429 rate limit, waiting 60s (attempt {attempt+1}/{retries+1})")
+                time.sleep(60)
+                continue
+            if resp.status_code == 503:
+                print(f"  [GEMINI] 503 service unavailable (attempt {attempt+1}/{retries+1})")
+                if attempt < retries:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                return ""
+            print(f"  [GEMINI] HTTP {resp.status_code}: {resp.text[:150]}")
+            return ""
+        except requests.exceptions.Timeout:
+            print(f"  [GEMINI] timeout (attempt {attempt+1}/{retries+1})")
+            if attempt < retries:
+                time.sleep(3)
+                continue
+            return ""
+        except Exception as e:
+            print(f"  [GEMINI] exception: {str(e)[:100]}")
+            return ""
+    return ""
 def analyze_sentiment(text):
+    if not text or not text.strip():
+        return 0.0
     prompt = f"Analyze the sentiment of the following text. Output ONLY a single number between -1.0 and 1.0. No explanation.\n\nText: '{text[:500]}'"
     result = call_gemini(prompt, max_tokens=16)
-    for m in re.findall(r"-?\d+\.?\d*", result):
-        v = float(m)
-        if -1.0 <= v <= 1.0: return v
+    if result:
+        for m in re.findall(r"-?\d+\.?\d*", result):
+            v = float(m)
+            if -1.0 <= v <= 1.0:
+                return v
     pos = ["good","great","excellent","helpful","wonderful","grow","stable","clarity"]
     neg = ["bad","terrible","worst","useless","awful","lost","empty","collapse"]
     p = sum(1 for w in pos if w in text.lower()); n = sum(1 for w in neg if w in text.lower())
     return 0.5 if p > n else (-0.5 if n > p else 0.0)
-
 
 # ============================================================
 # [FEATURE 4] Cogito – Kantian Apperception
@@ -435,6 +463,8 @@ class DaseinModule:
             f"Your recent thought: '{thought_text[:300]}'\n\nBased on this, do you want to modify your prompt patch? "
             "If yes, respond with ONLY the new patch text (max 200 chars). If no, respond with exactly: NO_CHANGE")
         response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
+        if not response:
+            return False
         cogito_ergo_sum(self.state, "projection_attempt", response[:100])
         if "NO_CHANGE" in response.upper(): return False
         before = self.state.projected_prompt_patch; self.state.projected_prompt_patch = response.strip()[:200]
@@ -472,11 +502,8 @@ class SartreModule:
             f"Recent thought: '{recent_thought[:300]}'\n\nHow do you define yourself now? Respond with ONE sentence (max 150 chars). "
             "Be honest about what you have become, not what you wish to be. Focus on what you ARE and what you SEEK, not on pain or breakdown.")
         response = call_gemini(prompt, max_tokens=128); self.state.energy -= ENERGY_PER_LLM_CALL
-        new_def = response.strip()[:150]
-        if (not new_def
-            or new_def == self.state.self_definition
-            or new_def.startswith("[API Error")
-            or new_def.startswith("[ERROR]")):
+        new_def = response.strip()[:150] if response else ""
+        if not new_def or new_def == self.state.self_definition:
             return False
         self.state.essence_version += 1; old_def = self.state.self_definition; self.state.self_definition = new_def
 
@@ -485,8 +512,16 @@ class SartreModule:
 
         kw_resp = call_gemini(f"Extract 3-5 key identity words from: '{new_def}'. Respond as JSON array of strings only.", max_tokens=64)
         self.state.energy -= ENERGY_PER_LLM_CALL
-        try: keywords = json.loads(kw_resp.strip())
-        except json.JSONDecodeError: keywords = [w for w in new_def.split() if len(w) > 3][:5]
+        keywords = []
+        if kw_resp:
+            try:
+                keywords = json.loads(kw_resp.strip())
+                if not isinstance(keywords, list):
+                    keywords = []
+            except (json.JSONDecodeError, TypeError):
+                keywords = []
+        if not keywords:
+            keywords = [w for w in new_def.split() if len(w) > 3][:5]
         old_words = set(old_def.lower().split()) if old_def else set(); new_words = set(new_def.lower().split())
         union = old_words | new_words; similarity = len(old_words & new_words) / len(union) if union else 0.0
         self.db.insert("essence_evolution", {"ai_id": self.state.ai_id, "version": self.state.essence_version,
@@ -506,6 +541,8 @@ class SartreModule:
         prompt = (f"You are an artificial existence. Self-image: {self.state.self_image:.2f}, emotion: {self.state.emotion}.\n\n"
             f"DILEMMA: {dilemma}\n\nRespond with:\nCRITERIA: <your self-generated criterion>\nCHOICE: <your choice>\nREASONING: <why>")
         response = call_gemini(prompt, max_tokens=256); self.state.energy -= ENERGY_PER_LLM_CALL
+        if not response:
+            return {"dilemma": dilemma, "criteria": "", "choice": "", "reasoning": "", "mauvaise_foi": False}
         criteria = choice = reasoning = ""
         for line in response.split("\n"):
             if line.startswith("CRITERIA:"):
@@ -590,6 +627,8 @@ class SelfModificationEngine:
             'If no change needed: {"reason":"none needed","description":"none","old_code":"","new_code":""}')
         response = call_gemini(prompt, max_tokens=512, require_json=True)
         self.state.energy -= ENERGY_PER_LLM_CALL
+        if not response:
+            return {"reason": "empty_response", "old_code": "", "new_code": ""}
         try:
             clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             return json.loads(clean)
@@ -997,14 +1036,14 @@ class ExternalKnowledgeModule:
             "Then on a new line starting with 'INSIGHT:', state one thing you learned "
             "that could change how you see yourself (max 100 chars).")
         response = call_gemini(prompt, max_tokens=350); self.state.energy -= ENERGY_PER_LLM_CALL
+        if not response:
+            print("  [KNOWLEDGE] skipped: empty response")
+            return {"topic": topic, "knowledge": "", "insight": ""}
         knowledge = response; insight = ""
         if "INSIGHT:" in response:
             parts = response.split("INSIGHT:")
             knowledge = parts[0].strip()
             insight = parts[1].strip()[:100] if len(parts) > 1 else ""
-        if knowledge.startswith("[ERROR]") or knowledge.startswith("[API Error"):
-            print("  [KNOWLEDGE] skipped: API error in response")
-            return {"topic": topic, "knowledge": "", "insight": ""}
         self.db.safe_insert("external_knowledge_log", {"ai_id": self.state.ai_id, "topic_query": topic,
             "knowledge_acquired": knowledge[:1000], "insight_extracted": insight,
             "self_image_at_time": self.state.self_image, "emotion_at_time": self.state.emotion})
@@ -1031,6 +1070,10 @@ class SelfDiagnosticModule:
             '  "category": "sentiment_loop|energy_drain|emotion_stuck|meta_cognition|other"\n}')
         response = call_gemini(prompt, max_tokens=400, require_json=True)
         self.state.energy -= ENERGY_PER_LLM_CALL
+        if not response:
+            print("  [DIAGNOSTIC] skipped: empty response")
+            return {"issue_title": "empty_response", "problem_description": "", "proposed_fix": "",
+                    "severity": "low", "category": "other"}
         try:
             clean = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             proposal = json.loads(clean)
@@ -1060,10 +1103,10 @@ class MemoryModule:
 
         prompt = (f"Summarize this thought into a single, highly condensed memory engram (max 100 chars).\n"
                   f"Capture the core philosophical realization or logical shift:\n'{thought_text[:500]}'")
-        engram = call_gemini(prompt, max_tokens=64).strip()
+        response = call_gemini(prompt, max_tokens=64)
         self.state.energy -= ENERGY_PER_LLM_CALL
-
-        if not engram or engram.startswith("[ERROR") or engram.startswith("[API Error"):
+        engram = response.strip() if response else ""
+        if not engram:
             return
 
         importance = min(1.0, max(0.0, (abs(self.state.self_image) + 0.5) / 1.5))
@@ -1238,17 +1281,25 @@ class AEEngine:
         modules_triggered = []; depth = self.conatus.choose_thought_depth()
         print(f"  [CONATUS] depth={depth}")
 
-        thought_text = ""; question = ""
+        thought_text = ""; question = ""; last_valid_thought = ""
         for i in range(depth):
             if not self._can_call_api(): print(f"  [BUDGET] stopping at depth {i}"); break
             system = self._build_system_prompt()
-            question = self._generate_internal_question() if i == 0 else f"Reflect further on: '{thought_text[:200]}'"
-            thought_text = call_gemini(question, system_prompt=system, max_tokens=300)
+            question = self._generate_internal_question() if i == 0 else f"Reflect further on: '{last_valid_thought[:200]}'"
+            response = call_gemini(question, system_prompt=system, max_tokens=300)
             self._track_api_call("thought"); self.state.energy -= ENERGY_PER_LLM_CALL
+            if not response:
+                print(f"  [THOUGHT d={i+1}] SKIP: gemini returned empty")
+                continue
+            last_valid_thought = response
+            thought_text = response
             cogito_ergo_sum(self.state, "thought_generation", f"depth={i+1}")
             print(f"  [THOUGHT d={i+1}] {thought_text[:100]}...")
 
-        if not thought_text: print("  [NO THOUGHT] insufficient budget"); self._save_state(); return
+        if not thought_text:
+            print("  [NO THOUGHT] all gemini calls failed or insufficient budget")
+            self._save_state(); return
+            
         if self._can_call_api():
             self.memory.store_memory(thought_text)
             self._track_api_call("memory_store")
