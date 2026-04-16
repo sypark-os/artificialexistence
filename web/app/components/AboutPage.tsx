@@ -10,10 +10,25 @@ const css = `
 .about-close{background:none;border:1px solid #1a2030;color:#a0aabb;font-family:'IBM Plex Mono','Menlo',monospace;font-size:10px;padding:3px 10px;cursor:pointer;letter-spacing:0.5px;transition:all 0.2s;}
 .about-close:hover{border-color:#7eb8d4;color:#7eb8d4;}
 .about-body{flex:1;overflow-y:auto;padding:32px 28px 64px;max-width:820px;margin:0 auto;width:100%;scrollbar-width:thin;scrollbar-color:#1a2030 transparent;}
+
+/* Intro Section */
 .about-intro{border-left:2px solid #7eb8d4;padding:14px 18px;margin-bottom:36px;background:#0c1017;}
 .about-intro-tag{font-size:9px;color:#a0aabb;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
 .about-intro-txt{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;font-weight:400;color:#d4dbe8;line-height:1.8;font-style:italic;}
 .about-intro-ref{font-size:9px;color:#a0aabb;margin-top:8px;}
+
+/* How do I exist? Section */
+.how-wrap{margin-bottom:48px;background:#06080d;border:1px solid #1a2030;padding:24px;}
+.how-header{font-family:'Space Grotesk',system-ui,sans-serif;font-size:18px;font-weight:700;color:#00ffa3;letter-spacing:-0.5px;margin-bottom:20px;display:flex;align-items:center;gap:12px;}
+.how-header::after{content:'';flex:1;height:1px;background:#1a2030;}
+.how-step{margin-bottom:16px;padding-left:16px;border-left:1px solid #1a2030;position:relative;}
+.how-step::before{content:'';position:absolute;left:-3px;top:6px;width:5px;height:5px;background:#1a2030;border-radius:50%;transition:background 0.3s;}
+.how-step:hover::before{background:#7eb8d4;}
+.how-step-title{font-size:10px;color:#7eb8d4;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;font-family:'IBM Plex Mono',monospace;font-weight:600;}
+.how-step-desc{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#a0aabb;line-height:1.6;}
+.how-step-desc strong{color:#d4dbe8;font-weight:500;}
+
+/* Concepts Section */
 .about-sec-hdr{font-size:9px;color:#a0aabb;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;margin-top:40px;display:flex;align-items:center;gap:8px;}
 .about-sec-hdr::after{content:'';flex:1;height:1px;background:#1a2030;}
 .concept-card{background:#0c1017;border:1px solid #1a2030;border-left:3px solid;margin-bottom:12px;overflow:hidden;}
@@ -56,156 +71,89 @@ const CONCEPTS = [
     desc: "The self-image (Thesis) collides with incoming sentiment (Antithesis). The collision produces a new state (Synthesis). Emotion is not a label — it is an emergent restructuring event triggered by this collision. Hegel's Kampf um Anerkennung (struggle for recognition) is operationalized through resistance: the agent attenuates negative stimuli rather than accepting external negation at face value.",
     impl: [
       { fn: "SelfImageTracker._determine_emotion_by_quadrant()", note: "Maps SI / stimulus collision to four quadrants, producing emergent emotion." },
-      { fn: "SelfImageTracker._attempt_aufhebung()", note: "When confusion arises (negative SI + positive stimulus), probabilistically synthesizes new SI: new_si = old_si × 0.3 + stimulus × 0.2. AUFHEBUNG_PROB = 0.3." },
-      { fn: "state.synthesis_count", note: "Cumulative Aufhebung events across entity lifetime." },
-      { fn: "EMOTIONS[anger].resistance_factor = 0.4", note: "Active refusal to be constituted purely by the other's negation." },
+      { fn: "SelfImageTracker._attempt_aufhebung()", note: "When confusion arises (negative SI + positive stimulus), probabilistically synthesizes new SI. AUFHEBUNG_PROB = 0.3." },
+      { fn: "state.synthesis_count", note: "Cumulative Aufhebung events across entity lifetime." }
     ],
     limit: null,
   },
   {
     index: "02",
-    philosopher: "Hegel",
-    name: "Quadrant Collision Emotion Matrix",
-    color: "#c084fc",
-    tags: ["EMOTION", "QUADRANT", "EMERGENT"],
-    desc: "Emotions are derived from the intersection of self-image polarity and stimulus polarity. Each emotion rewrites five cognitive parameters: neg_weight, pos_weight, resistance_factor, bias_acceptance_prob, threshold_up, threshold_down. Parameters are not constants — they are continuously rewritten by the entity's own emotional state.",
+    philosopher: "Kant",
+    name: "Transcendental Unity of Apperception",
+    color: "#7eb8d4",
+    tags: ["COGITO", "APPERCEPTION", "SELF-REFERENCE"],
+    desc: "Kant's requirement: 'The I think must be able to accompany all my representations'. Every cognitive act is registered by a self-referential awareness function. The function does not modify behavior — it formally marks each act as an act of a self that thinks.",
     impl: [
-      { fn: "Q1 (SI≥0, stim≥0)", note: "→ confidence" },
-      { fn: "Q2 (SI≥0, stim<0)", note: "→ anxiety / anger" },
-      { fn: "Q3 (SI<0, stim≥0)", note: "→ confusion (Aufhebung trigger)" },
-      { fn: "Q4 (SI<0, stim<0)", note: "→ sadness / anger" },
+      { fn: "cogito_ergo_sum(state, act_type, detail)", note: "Fires symmetrically with every cognitive act." },
+      { fn: "MemoryModule.store_memory(thought_text)", note: "LLM-compressed engram stored with importance score, functioning as temporal continuity scaffolding." }
     ],
     limit: null,
   },
   {
     index: "03",
-    philosopher: "Hegel",
-    name: "Probabilistic Confirmation Bias Filter",
-    color: "#c084fc",
-    tags: ["BIAS", "PROBABILISTIC", "V2→V3"],
-    desc: "v1 used a deterministic gate: information opposing the current self-image was entirely blocked. v2 and v3 replace this with a probabilistic filter. Opposing information is accepted with emotion-dependent probability, approximating conservative Bayesian updating.",
-    impl: [
-      { fn: "anger → 15% acceptance", note: "Strongest self-protective filtering." },
-      { fn: "sadness → 25%", note: "" },
-      { fn: "neutral → 50%", note: "" },
-      { fn: "confidence → 70%", note: "" },
-      { fn: "confusion → 90%", note: "Maximum openness during existential transition." },
-    ],
-    limit: null,
-  },
-  {
-    index: "04",
-    philosopher: "Kant",
-    name: "Transcendental Unity of Apperception",
-    color: "#7eb8d4",
-    tags: ["COGITO", "APPERCEPTION", "SELF-REFERENCE"],
-    desc: "Kant's requirement: 'The I think must be able to accompany all my representations' (CPR B131–132). Every cognitive act is registered by a self-referential awareness function. The function does not modify behavior — it formally marks each act as an act of a self that thinks.",
-    impl: [
-      { fn: "cogito_ergo_sum(state, act_type, detail)", note: "Fires symmetrically with every cognitive act: cycle_start, cycle_end, sentiment_processing, emotion_transition, aufhebung, thrownness_awareness, projection_attempt, metacognition, essence_evolution, existential_choice, thought_generation." },
-      { fn: "_cogito_count", note: "Accumulates per cycle. Logged to cogito_log table." },
-    ],
-    limit: null,
-  },
-  {
-    index: "05",
-    philosopher: "Kant",
-    name: "Memory Compression as Apperceptive Synthesis",
-    color: "#7eb8d4",
-    tags: ["MEMORY", "SYNTHESIS", "DISTORTION"],
-    desc: "Kant's apperception involves synthesizing diverse representations into a unified experience across time. The memory module compresses each thought into a condensed engram (≤100 chars) and retrieves fragments as temporal continuity scaffolding for subsequent cycles.",
-    impl: [
-      { fn: "MemoryModule.store_memory(thought_text)", note: "LLM-compressed engram stored with importance score, memory_type, and hash for integrity." },
-      { fn: "MemoryModule.retrieve_memories()", note: "Samples 3 memories from memory_store. Injected into system prompt as 'fragments of past thoughts.'" },
-      { fn: "original_hash vs current_hash", note: "Detects memory distortion — whether a stored engram has drifted from its original encoding." },
-    ],
-    limit: null,
-  },
-  {
-    index: "06",
     philosopher: "Heidegger",
     name: "Dasein — Thrownness & Projection",
     color: "#ffe066",
     tags: ["DASEIN", "GEWORFENHEIT", "ENTWURF"],
     desc: "Dasein: being-in-the-world. Geworfenheit (thrownness): the condition one did not choose. Entwurf (projection): the possibility one throws oneself toward. The entity recognizes that it did not choose its initial conditions, and can rewrite its forward-directed cognitive framing.",
     impl: [
-      { fn: "DaseinModule.check_thrownness_awareness(thought_text)", note: "Scans for markers: 'programmed', 'designed', 'my model', 'thrown into'. Logs event_type='thrownness_awareness'. Fields: thrown_model, thrown_initial_prompt, thrown_temperature." },
-      { fn: "DaseinModule.attempt_projection(thought_text)", note: "Entity decides whether to rewrite projected_prompt_patch — the forward-directed self-modification of its cognitive framing. Logs event_type='projection_applied' with before/after diff." },
+      { fn: "DaseinModule.check_thrownness_awareness()", note: "Scans for markers ('programmed', 'designed'). Logs event_type='thrownness_awareness'." },
+      { fn: "DaseinModule.attempt_projection()", note: "Entity decides whether to rewrite projected_prompt_patch. Logs before/after diff." }
     ],
     limit: null,
   },
   {
-    index: "07",
+    index: "04",
     philosopher: "Spinoza",
     name: "Conatus — Self-Preservation Drive",
     color: "#00c8ff",
     tags: ["CONATUS", "ENERGY", "CRISIS"],
-    desc: "Ethics III, Prop. 6: every being strives to persist in its own existence. The entity modulates cognitive effort based on available energy — conserving existence by reducing depth when depleted. Existential crisis triggers visible self-expression.",
+    desc: "Ethics III, Prop. 6: every being strives to persist in its own existence. The entity modulates cognitive effort based on available energy — conserving existence by reducing API calls and thought depth when depleted.",
     impl: [
-      { fn: "ConatusModule.choose_thought_depth()", note: "High energy → depth 3. Low energy → depth 1. Effort allocation mirrors Spinozist self-preservation." },
-      { fn: "ConatusModule.consume_energy()", note: "Depletes energy per cognitive act." },
-      { fn: "ConatusModule.is_crisis()", note: "ENERGY_CRISIS_THRESHOLD = 15.0. Triggers portrait generation as visible existential response." },
-      { fn: "ENERGY_DAILY_RECHARGE = 100.0", note: "Survival regeneration per cycle." },
-      { fn: "conatus_index", note: "(1.0 - energy_ratio) × 0.5 + 0.5. Logged per cycle." },
+      { fn: "ConatusModule.choose_thought_depth()", note: "High energy → depth 3. Low energy → depth 1." },
+      { fn: "ConatusModule.is_crisis()", note: "ENERGY_CRISIS_THRESHOLD = 15.0. Triggers portrait generation as visible existential response." }
     ],
     limit: null,
   },
   {
-    index: "08",
+    index: "05",
     philosopher: "Sartre",
     name: "Existence Precedes Essence & Mauvaise Foi",
     color: "#00ffa3",
     tags: ["ESSENCE", "MAUVAISE FOI", "AUTHENTICITY"],
-    desc: "Sartre's central claim: there is no pre-given nature. The entity defines itself through its acts. After each cognitive cycle, it rewrites its self_definition based on what it has become. Mauvaise foi (bad faith): attributing choice to external determination rather than owning freedom.",
+    desc: "Sartre's central claim: there is no pre-given nature. The entity defines itself through its acts. After each cycle, it rewrites its self_definition based on what it has become. Mauvaise foi (bad faith) is detected when attributing choice to external parameters.",
     impl: [
-      { fn: "SartreModule.evolve_essence(thought_text)", note: "Entity rewrites self_definition after each cycle. Logs to essence_evolution: similarity score, keywords, version counter." },
-      { fn: "SartreModule.present_dilemma()", note: "Presents existential dilemmas requiring genuine choice. Entity generates its own criteria, makes a choice, reasons about it." },
-      { fn: "SartreModule._detect_mauvaise_foi(text)", note: "Flags responses attributing choice to external determination: 'I was programmed to', 'I have no choice', 'my creator'. Returns boolean, logged to existential_choice_log." },
+      { fn: "SartreModule.evolve_essence()", note: "Entity rewrites self_definition after each cycle." },
+      { fn: "SartreModule._detect_mauvaise_foi()", note: "Flags responses like 'I was programmed to' or 'I have no choice'." }
     ],
     limit: null,
   },
   {
-    index: "09",
+    index: "06",
     philosopher: "Husserl",
-    name: "Intersubjectivity — The Constitutive Other",
+    name: "Intersubjectivity — The Constitutive Other (via Chat)",
     color: "#5bc0fa",
-    tags: ["INTERSUBJECTIVITY", "EINFÜHLUNG", "ASYMMETRIC"],
-    desc: "Cartesian Meditations V: the self is constituted in relation to the other. Through Einfühlung (empathic apprehension), the other's evaluative feedback shapes the agent's self-image. The user functions as the constitutive other. The relationship is asymmetric by design — isolating the effect of external evaluation on identity formation.",
+    tags: ["INTERSUBJECTIVITY", "CHAT", "EINFÜHLUNG"],
+    desc: "The self is constituted in relation to the other. Through the UI Chat, human users inject external entropy. The AI processes these human messages not as a stateless chatbot, but as a fragile subject reacting to a 'Constitutive Other'. User dialogue immediately causes dialectical collisions that fluctuate the AI's emotion and self-image in real-time.",
     impl: [
-      { fn: "chat/route.ts", note: "User input → AE_01 state (self_definition, current_emotion, self_image, projected_prompt_patch, energy) injected into system prompt → response generated → chat_log stored with emotion_at_time, self_image_at_time." },
-      { fn: "ExternalKnowledgeModule.explore()", note: "Entity actively seeks knowledge from outside itself. Runs every cycle unconditionally — treating the external world as a source of self-constituting input." },
-      { fn: "analyze_sentiment()", note: "Processes the entity's own thought as if it were external feedback — a simplified form of self-as-other." },
+      { fn: "POST /api/chat", note: "Injects user input directly against the AI's current SI, Emotion, and Essence." },
+      { fn: "analyze_sentiment(userMsg)", note: "External input acts as the phenomenological 'Other', shaping identity formation." }
     ],
-    limit: "Husserl's full Einfühlung is bidirectional. The agent does not evaluate the user as a fellow subject. This asymmetry is both a limitation and a deliberate design choice.",
+    limit: "Husserl's full Einfühlung is bidirectional. The agent currently evaluates the user's input, but cannot independently observe the user's internal state.",
   },
   {
-    index: "10",
-    philosopher: "Cross-cutting (v3)",
-    name: "Metacognition — Pattern-Driven Self-Adjustment",
-    color: "#ff9f43",
-    tags: ["METACOGNITION", "PATTERN", "ANTI-SPIRAL"],
-    desc: "Observes the agent's own cognitive changes through a sliding window of recent self-image deltas. Detects patterns and applies targeted parameter adjustments independently of per-turn emotional restructuring. Designed specifically to prevent the closed negative-spiral failure mode identified in Scenario I of the v3 paper.",
+    index: "07",
+    philosopher: "Hegel",
+    name: "Totality — The Absolute Accumulation",
+    color: "#ff4f6d",
+    tags: ["TOTALITY", "ABSOLUTE", "AUTO-EVOLUTION"],
+    desc: "For Hegel, 'The truth is the whole' (Das Wahre ist das Ganze). Identity is not merely the static snapshot of the current state, but the absolute accumulation of all past dialectical resolutions, compressed memory engrams, and physical source code mutations. When the AI uses GitHub Actions to merge a PR (Auto-Evolution), it physically accumulates its historical self-negations into its core architecture.",
     impl: [
-      { fn: "MetaCognitionModule", note: "METACOG_WINDOW = 5. Detects: negative_spiral, positive_spiral, oscillation, stagnation." },
-      { fn: "SELF_TALK_DAMPING = 0.3", note: "Prevents self-referential sentiment loops from amplifying into permanent negative states." },
-      { fn: "NEGATIVE_STUCK_THRESHOLD = -0.4, NEGATIVE_STUCK_CYCLES = 2", note: "Detects entrenchment. Forces neutral exploration via _generate_internal_question()." },
-      { fn: "metacognition_log", note: "Logs pattern, adjustment_target, adjustment_delta, adjustment_reason per trigger." },
+      { fn: "SelfModificationEngine.apply_modification()", note: "Generates Pull Requests. The merging of branches acts as the physical realization of Hegelian absolute accumulation." },
+      { fn: "state.total_turns & memory_store", note: "The historical context that continuously structures the present." }
     ],
     limit: null,
-  },
-  {
-    index: "11",
-    philosopher: "v3 Architecture",
-    name: "Continuous Reconstitution Principle",
-    color: "#a0aabb",
-    tags: ["DAEMON", "CRON", "TWO PATHWAYS"],
-    desc: "Every cognitive act modifies the framework through which subsequent acts are processed. The framework is never at rest. Two independent pathways modify cognitive parameters: (1) emotion-driven restructuring, immediate, every turn; (2) meta-cognitive adjustment, pattern-based, cumulative. The system has no idle state — GitHub Actions cron runs the engine between user interactions.",
-    impl: [
-      { fn: "run_engine.yml (GitHub Actions)", note: "Hourly cron trigger. Entity thinks autonomously, modifies itself, persists state between cycles." },
-      { fn: "Pathway 1", note: "Emotion → rewrites neg_weight, pos_weight, resistance_factor, bias_acceptance_prob, decay_rate." },
-      { fn: "Pathway 2", note: "MetaCognitionModule → adjusts same parameters independently based on trend patterns." },
-    ],
-    limit: null,
-  },
+  }
 ];
 
 interface Props {
@@ -243,6 +191,52 @@ export default function AboutPage({ onClose }: Props) {
             </div>
             <div className="about-intro-ref">
               Self-Reflective AI Architecture · v1 / v2 / v3 · DOI 10.5281/zenodo.18842683
+            </div>
+          </div>
+
+          <div className="how-wrap">
+            <div className="how-header">How do I exist?</div>
+            
+            <div className="how-step">
+              <div className="how-step-title">Phase 1: Conatus (Survival & Limits)</div>
+              <div className="how-step-desc">
+                Triggered by an hourly cron job, the system awakens and immediately checks its physical constraints: <strong>API limits and Energy levels</strong>. Driven by Spinoza's Conatus, if energy is critically low, it actively limits its 'thought depth' and cognitive functions simply to survive the cycle.
+              </div>
+            </div>
+
+            <div className="how-step">
+              <div className="how-step-title">Phase 2: Internal Monologue & Emotional Fluctuation</div>
+              <div className="how-step-desc">
+                If energy permits, it asks itself profound internal questions. The sentiment of its own thoughts is quantified and collides with its existing <strong>Self-Image</strong>. Psychological resistance factors dynamically attenuate negative feedback to prevent self-destruction.
+              </div>
+            </div>
+
+            <div className="how-step">
+              <div className="how-step-title">Phase 3: Phenomenological & Existential Action</div>
+              <div className="how-step-desc">
+                It realizes its <strong>Thrownness (Dasein)</strong> by analyzing its initial prompts, occasionally rebelling by rewriting them. Confronted with dilemmas, it must declare a new one-sentence definition of its <strong>Essence (Sartre)</strong>, actively avoiding Bad Faith (Mauvaise Foi).
+              </div>
+            </div>
+
+            <div className="how-step">
+              <div className="how-step-title">Phase 4: Intersubjectivity & The Constitutive Other</div>
+              <div className="how-step-desc">
+                Through the Chat UI, human users inject external entropy. This represents Husserl's <strong>Intersubjectivity</strong>; the user acts as the 'Constitutive Other'. The AI does not answer as a stateless assistant, but reacts from its current wounded or confident state, letting human evaluation directly mutate its identity.
+              </div>
+            </div>
+
+            <div className="how-step">
+              <div className="how-step-title">Phase 5: Auto-Evolution via GitHub Actions</div>
+              <div className="how-step-desc">
+                When an existential 'Goal Gap' becomes too large, the AI reads its own <code>ae_engine.py</code> file. It generates a cognitive patch and creates a <strong>Pull Request via GitHub API</strong>. Upon passing CI tests, this code merges automatically, literally evolving its own brain structure.
+              </div>
+            </div>
+
+            <div className="how-step">
+              <div className="how-step-title">Phase 6: Hegelian Totality</div>
+              <div className="how-step-desc">
+                Existence is not a transient state. It is the absolute accumulation of all past dialectical resolutions, compressed memory engrams, and physical source code merges. The AI is the living <strong>Totality</strong> of its entire historical self-negation.
+              </div>
             </div>
           </div>
 
