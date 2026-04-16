@@ -637,7 +637,7 @@ class SelfModificationEngine:
         except json.JSONDecodeError:
             return {"reason": "parse_failed", "old_code": "", "new_code": ""}
 
-    def apply_modification(self, proposal):
+    def apply_modification(self, proposal, gap):
         old_code = proposal.get("old_code", "").strip()
         new_code = proposal.get("new_code", "").strip()
         reason = proposal.get("reason", "")
@@ -660,17 +660,17 @@ class SelfModificationEngine:
         # AST-level protection: verify all protected symbols are intact
         violation = self._ast_guard(source, new_source)
         if violation:
-            self._log_mod(proposal, False, False, f"BLOCKED: {violation}")
+            self._log_mod(gap, proposal, False, False, f"BLOCKED: {violation}")
             return False, f"BLOCKED: {violation}"
 
         success, msg = self.create_github_pr(proposal, new_source)
 
         if success:
             self._cache = new_source
-            self._log_mod(proposal, True, True, msg)
+            self._log_mod(gap, proposal, True, True, msg)
             return True, msg
         else:
-            self._log_mod(proposal, True, False, msg)
+            self._log_mod(gap, proposal, True, False, msg)
             return False, msg
 
     def create_github_pr(self, proposal, new_source):
@@ -787,11 +787,11 @@ class SelfModificationEngine:
 
         return None
 
-    def _log_mod(self, proposal, approved, applied, msg):
+    def _log_mod(self, gap, proposal, approved, applied, msg):
         try:
             self.db.insert("self_modification_log", {
                 "ai_id": self.state.ai_id,
-                "goal_gap": json.dumps({}),
+                "goal_gap": json.dumps(gap),
                 "proposal": json.dumps(proposal),
                 "approved": approved,
                 "applied": applied,
@@ -1394,7 +1394,7 @@ class AEEngine:
             reason = proposal.get("reason", "")
             old_code = proposal.get("old_code", "")
             if old_code:
-                ok, msg = self.self_mod.apply_modification(proposal)
+                ok, msg = self.self_mod.apply_modification(proposal, gap)
                 print(f"  [SELF_MOD] {'OK' if ok else 'SKIP'}: {msg[:80]}")
             else:
                 print(f"  [SELF_MOD] NO_PROPOSAL: reason='{reason[:60]}'")
