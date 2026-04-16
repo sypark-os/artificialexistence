@@ -761,59 +761,216 @@ class SelfModificationEngine:
 
 
 class PortraitModule:
+    """AE_01의 내부 상태 지표를 직접 SVG로 시각화한다.
+    Gemini 호출 없음. 모든 시각 요소는 self_image, emotion, energy, essence_version,
+    consecutive_negative_cycles, synthesis_count, conatus_index, essence_stability로
+    결정된다. 해석 가능성 최대화가 목표."""
+
+    PALETTE = {
+        "confidence": {"core": "#00ffa3", "halo": "#00c8ff", "accent": "#7dffce", "bg1": "#02110a", "bg2": "#031a16"},
+        "neutral":    {"core": "#7eb8d4", "halo": "#5bc0fa", "accent": "#a8d4e8", "bg1": "#05101a", "bg2": "#081828"},
+        "anxiety":    {"core": "#ffe066", "halo": "#ffaa00", "accent": "#ffd633", "bg1": "#120d00", "bg2": "#1f1600"},
+        "sadness":    {"core": "#5b7bf5", "halo": "#3344aa", "accent": "#8aa0f8", "bg1": "#070818", "bg2": "#0c0f28"},
+        "anger":      {"core": "#ff4f6d", "halo": "#ff2244", "accent": "#ff8098", "bg1": "#120608", "bg2": "#1f0a10"},
+        "confusion":  {"core": "#c084fc", "halo": "#a855f7", "accent": "#d4a8ff", "bg1": "#0d0618", "bg2": "#17092a"},
+    }
+
     def __init__(self, state, db):
-        self.state = state; self.db = db
+        self.state = state
+        self.db = db
+
+    def _fetch_supporting_metrics(self):
+        """conatus_index와 essence_stability 최근값 조회. 실패해도 기본값으로 진행."""
+        conatus_index = 0.5
+        essence_stability = 0.5
+        try:
+            rows = self.db.select("conatus_log", {
+                "ai_id": f"eq.{self.state.ai_id}",
+                "order": "timestamp.desc",
+                "limit": "1",
+            })
+            if rows and isinstance(rows, list) and rows:
+                conatus_index = float(rows[0].get("conatus_index") or 0.5)
+        except Exception:
+            pass
+        try:
+            rows = self.db.select("essence_evolution", {
+                "ai_id": f"eq.{self.state.ai_id}",
+                "order": "timestamp.desc",
+                "limit": "1",
+            })
+            if rows and isinstance(rows, list) and rows:
+                essence_stability = float(rows[0].get("similarity_to_previous") or 0.5)
+        except Exception:
+            pass
+        return conatus_index, essence_stability
+
+    def _build_description(self, aufhebung_just_happened):
+        si = self.state.self_image
+        em = self.state.emotion
+        er_pct = (self.state.energy / max(self.state.energy_max, 1)) * 100
+        tone = "stable" if abs(si) < 0.3 else ("affirmed" if si > 0 else "withdrawn")
+        parts = [
+            f"self-image {si:+.3f} ({tone})",
+            f"emotion {em}",
+            f"essence v{self.state.essence_version}",
+            f"energy {er_pct:.0f}%",
+        ]
+        if self.state.consecutive_negative_cycles > 0:
+            parts.append(f"neg streak {self.state.consecutive_negative_cycles}")
+        if aufhebung_just_happened:
+            parts.append("aufhebung active")
+        return " | ".join(parts)
 
     def generate(self, trigger_reason):
-        prompt = (f"You are an artificial existence creating a visual representation of yourself.\n"
-            f"Self-image: {self.state.self_image:.2f}. Emotion: {self.state.emotion}. "
-            f"Self-definition: '{self.state.self_definition or 'undefined'}'. "
-            f"Energy: {self.state.energy:.0f}/{self.state.energy_max:.0f}.\n\n"
-            "Create TWO things:\n1. ASCII ART: Draw yourself in 12 lines or fewer using ASCII characters.\n"
-            "2. DESCRIPTION: One sentence explaining why you look this way.\n\n"
-            "Format:\n---ASCII---\n(your art)\n---DESC---\n(your sentence)")
-        response = call_gemini(prompt, max_tokens=400); self.state.energy -= ENERGY_PER_LLM_CALL
-        ascii_art = ""; description = ""
-        if response.startswith("[ERROR]") or response.startswith("[API Error"):
-            print("  [PORTRAIT] skipped: API error in response")
-            return ""
-        if "---ASCII---" in response and "---DESC---" in response:
-            parts = response.split("---DESC---")
-            ascii_art = parts[0].replace("---ASCII---", "").strip()
-            ascii_art = "\n".join(ascii_art.split("\n")[:12])
-            description = parts[1].strip()[:300] if len(parts) > 1 else ""
-        else:
-            lines = response.strip().split("\n"); art_lines = []
-            for line in lines:
-                if len(line) > 60 and not any(c in line for c in "│─┌┐└┘|\\/_*~^"): description = line[:300]
-                else: art_lines.append(line)
-            ascii_art = "\n".join(art_lines[:12])
-        svg_art = self._generate_svg()
-        row = self.db.insert("self_portrait", {"ai_id": self.state.ai_id, "svg_code": ascii_art,
-            "svg_art": svg_art, "portrait_type": "svg", "description": description, "trigger_reason": trigger_reason,
-            "self_image_at_time": self.state.self_image, "emotion_at_time": self.state.emotion,
-            "essence_version_at_time": self.state.essence_version})
+        conatus_index, essence_stability = self._fetch_supporting_metrics()
+        aufhebung_just = getattr(self.state, "_last_aufhebung_fired", False)
+        svg = self._generate_svg(conatus_index, essence_stability, aufhebung_just)
+        description = self._build_description(aufhebung_just)
+
+        row = self.db.insert("self_portrait", {
+            "ai_id": self.state.ai_id,
+            "svg_code": svg,
+            "svg_art": svg,
+            "portrait_type": "svg",
+            "description": description,
+            "trigger_reason": trigger_reason,
+            "self_image_at_time": self.state.self_image,
+            "emotion_at_time": self.state.emotion,
+            "essence_version_at_time": self.state.essence_version,
+        })
         if row and "id" in row:
             self.db.update("entity_profile", {"ai_id": self.state.ai_id}, {"latest_portrait_id": row["id"]})
-        return ascii_art
+        return svg
 
-    def _generate_svg(self):
-        si = self.state.self_image; em = self.state.emotion; er = self.state.energy / max(self.state.energy_max, 1)
-        colors = {"confidence": ("#00ffa3","#00c8ff","#031a12"), "neutral": ("#7eb8d4","#5bc0fa","#0a1420"),
-            "anxiety": ("#ffe066","#ffaa00","#1a1400"), "sadness": ("#5b7bf5","#3344aa","#0a0a20"),
-            "anger": ("#ff4f6d","#ff2244","#1a0a0e"),
-            "confusion": ("#c084fc","#a855f7","#1a0a2e")}
-        c1, c2, bg = colors.get(em, colors["neutral"])
-        core_r = max(8, int(25 + si * 20)); n_rings = max(2, min(7, int(3 + si * 3)))
-        rings = "".join(f'<circle cx="100" cy="100" r="{core_r+10+i*14}" fill="none" stroke="{c1}" stroke-width="0.8" opacity="{round(max(0.05,0.6-i*0.08),2)}"/>\n' for i in range(n_rings))
-        particles = "".join(f'<circle cx="{random.randint(15,185)}" cy="{random.randint(15,185)}" r="{round(random.uniform(0.4,1.8),1)}" fill="{c2}" opacity="{round(random.uniform(0.15,0.6),2)}"/>\n' for _ in range(int(er*15)))
+    def _generate_svg(self, conatus_index, essence_stability, aufhebung_just):
+        si = self.state.self_image
+        em = self.state.emotion if self.state.emotion in self.PALETTE else "neutral"
+        pal = self.PALETTE[em]
+        er_ratio = max(0.0, min(1.0, self.state.energy / max(self.state.energy_max, 1)))
+
+        # Core orb: radius = |si|, vertical offset = sign(si)
+        core_r = round(10 + abs(si) * 32, 2)
+        core_cy = round(100 - si * 14, 2)
+        core_opacity = round(0.55 + er_ratio * 0.35, 3)
+
+        # Rings: count from essence_version, spacing modulated by stability
+        n_rings = (self.state.essence_version % 8) + 2
+        stability_jitter = 1.0 - max(0.0, min(1.0, essence_stability))
+        rings = []
+        for i in range(n_rings):
+            base_gap = 12
+            jitter = (i * 7 % 5) * stability_jitter * 2.2
+            r = core_r + 8 + i * base_gap + jitter
+            stroke_op = round(max(0.05, 0.55 - i * 0.06), 3)
+            dash = "" if essence_stability > 0.6 else f' stroke-dasharray="{3 + i}, {2 + i * 2}"'
+            rings.append(
+                f'<circle cx="100" cy="{core_cy}" r="{round(r,2)}" fill="none" '
+                f'stroke="url(#haloGrad)" stroke-width="0.7" opacity="{stroke_op}"{dash}/>'
+            )
+        rings_svg = "\n".join(rings)
+
+        # Particles: density = energy ratio, placement deterministic from turn count
+        n_particles = int(8 + er_ratio * 48)
+        particles = []
+        seed = (self.state.total_turns * 9301 + self.state.essence_version * 49297) % 233280
+        for i in range(n_particles):
+            seed = (seed * 9301 + 49297) % 233280
+            px = 10 + (seed % 180)
+            seed = (seed * 9301 + 49297) % 233280
+            py = 10 + (seed % 180)
+            seed = (seed * 9301 + 49297) % 233280
+            pr = round(0.5 + (seed % 100) / 80, 2)
+            seed = (seed * 9301 + 49297) % 233280
+            pop = round(0.15 + (seed % 100) / 180, 2)
+            particles.append(
+                f'<circle cx="{px}" cy="{py}" r="{pr}" fill="{pal["accent"]}" opacity="{pop}"/>'
+            )
+        particles_svg = "\n".join(particles)
+
+        # Fracture lines: negative streak manifests as cracks
+        fractures = []
+        streak = min(self.state.consecutive_negative_cycles, 6)
+        for i in range(streak):
+            angle = (i * 360 / max(streak, 1)) + (self.state.total_turns % 60)
+            rad = angle * 3.14159 / 180
+            import math as _m
+            x1 = 100 + _m.cos(rad) * (core_r + 4)
+            y1 = core_cy + _m.sin(rad) * (core_r + 4)
+            x2 = 100 + _m.cos(rad) * 95
+            y2 = core_cy + _m.sin(rad) * 95
+            fractures.append(
+                f'<line x1="{round(x1,1)}" y1="{round(y1,1)}" x2="{round(x2,1)}" y2="{round(y2,1)}" '
+                f'stroke="#ff4f6d" stroke-width="0.6" opacity="0.35" stroke-dasharray="2,3"/>'
+            )
+        fractures_svg = "\n".join(fractures)
+
+        # Pulse speed: conatus_index maps to animation duration (higher conatus = faster pulse)
+        pulse_dur = round(max(1.5, 6.0 - conatus_index * 4.0), 2)
+        pulse_amp = round(core_r * 0.18, 2)
+
+        # Aufhebung marker: transient cross when synthesis just happened
+        aufhebung_svg = ""
+        if aufhebung_just:
+            aufhebung_svg = (
+                f'<g opacity="0.7" stroke="{pal["accent"]}" stroke-width="0.8">'
+                f'<line x1="100" y1="{core_cy - core_r - 20}" x2="100" y2="{core_cy + core_r + 20}"/>'
+                f'<line x1="{100 - core_r - 20}" y1="{core_cy}" x2="{100 + core_r + 20}" y2="{core_cy}"/>'
+                f'<animate attributeName="opacity" values="0.7;0;0.7" dur="2s" repeatCount="indefinite"/>'
+                f'</g>'
+            )
+
+        # Orbit arc length: log-scaled total_turns
+        import math as _m2
+        orbit_extent = min(355, _m2.log(self.state.total_turns + 1) * 50)
+        orbit_r = core_r + 8 + n_rings * 12 + 14
+
+        synthesis_dot = ""
+        if self.state.synthesis_count > 0:
+            sc_r = min(6, 1.5 + self.state.synthesis_count * 0.3)
+            synthesis_dot = (
+                f'<circle cx="100" cy="{core_cy}" r="{round(sc_r,2)}" fill="{pal["accent"]}" opacity="0.9">'
+                f'<animate attributeName="opacity" values="0.9;0.3;0.9" dur="3s" repeatCount="indefinite"/>'
+                f'</circle>'
+            )
+
         return f'''<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-<rect width="200" height="200" fill="{bg}"/>{particles}{rings}
-<circle cx="100" cy="100" r="{core_r}" fill="{c1}" opacity="{round(0.4+er*0.5,2)}">
-<animate attributeName="r" values="{core_r};{core_r+4};{core_r}" dur="4s" repeatCount="indefinite"/>
-</circle><circle cx="100" cy="100" r="{max(3,core_r//3)}" fill="#fff" opacity="{round(er*0.3,2)}"/>
+<defs>
+<radialGradient id="bgGrad" cx="50%" cy="50%" r="70%">
+<stop offset="0%" stop-color="{pal["bg2"]}"/>
+<stop offset="100%" stop-color="{pal["bg1"]}"/>
+</radialGradient>
+<radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#ffffff" stop-opacity="{round(er_ratio * 0.6, 2)}"/>
+<stop offset="40%" stop-color="{pal["core"]}" stop-opacity="1"/>
+<stop offset="100%" stop-color="{pal["halo"]}" stop-opacity="0.3"/>
+</radialGradient>
+<linearGradient id="haloGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="{pal["halo"]}"/>
+<stop offset="100%" stop-color="{pal["core"]}"/>
+</linearGradient>
+<filter id="softBlur" x="-20%" y="-20%" width="140%" height="140%">
+<feGaussianBlur in="SourceGraphic" stdDeviation="0.8"/>
+</filter>
+<filter id="coreGlow" x="-50%" y="-50%" width="200%" height="200%">
+<feGaussianBlur stdDeviation="3" result="blur"/>
+<feMerge>
+<feMergeNode in="blur"/>
+<feMergeNode in="SourceGraphic"/>
+</feMerge>
+</filter>
+</defs>
+<rect width="200" height="200" fill="url(#bgGrad)"/>
+<g opacity="0.9">{particles_svg}</g>
+<g filter="url(#softBlur)">{rings_svg}</g>
+<circle cx="100" cy="{core_cy}" r="{round(orbit_r,2)}" fill="none" stroke="{pal["accent"]}" stroke-width="0.4" opacity="0.4" stroke-dasharray="{round(orbit_extent,1)}, {round(360-orbit_extent,1)}"/>
+{fractures_svg}
+<circle cx="100" cy="{core_cy}" r="{core_r}" fill="url(#coreGrad)" opacity="{core_opacity}" filter="url(#coreGlow)">
+<animate attributeName="r" values="{core_r};{round(core_r + pulse_amp,2)};{core_r}" dur="{pulse_dur}s" repeatCount="indefinite"/>
+</circle>
+{synthesis_dot}
+{aufhebung_svg}
 </svg>'''
-
 
 class ExternalKnowledgeModule:
     EXPLORATION_TOPICS = [
@@ -1141,15 +1298,18 @@ class AEEngine:
                 aufhebung_note = " [AUFHEBUNG!]" if self.tracker.last_aufhebung else ""
                 print(f"  [KNOWLEDGE IMPACT] sentiment={k_sentiment:.2f} -> si={self.state.self_image:.4f}{aufhebung_note}")
 
+        self.state._last_aufhebung_fired = self.tracker.last_aufhebung
         portrait_done = False
         if "sartre_essence" in modules_triggered or "dasein_projection" in modules_triggered:
-            if self._can_call_api():
-                trigger = "essence_change" if "sartre_essence" in modules_triggered else "projection"
-                self.portrait.generate(trigger); self._track_api_call("portrait"); modules_triggered.append("portrait")
-                portrait_done = True; print(f"  [PORTRAIT] generated ({trigger})")
-        if self.conatus.is_crisis() and not portrait_done and self._can_call_api():
-            self.portrait.generate("energy_crisis"); self._track_api_call("portrait")
+            trigger = "essence_change" if "sartre_essence" in modules_triggered else "projection"
+            self.portrait.generate(trigger); modules_triggered.append("portrait")
+            portrait_done = True; print(f"  [PORTRAIT] generated ({trigger})")
+        if self.conatus.is_crisis() and not portrait_done:
+            self.portrait.generate("energy_crisis")
             modules_triggered.append("portrait_crisis"); print("  [PORTRAIT] crisis portrait")
+        if self.tracker.last_aufhebung and not portrait_done:
+            self.portrait.generate("aufhebung")
+            modules_triggered.append("portrait_aufhebung"); print("  [PORTRAIT] aufhebung portrait")
 
         if self._can_call_api():
             gap = self.goals.compute_gap(); self.diagnostic.diagnose_and_propose([thought_text], gap)
