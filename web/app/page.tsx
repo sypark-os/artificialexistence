@@ -3,6 +3,7 @@
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import AboutPage from "./components/AboutPage";
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -244,6 +245,7 @@ export default function AEObserver() {
   const [chatError,     setChatError]     = useState("");
   const [hourRemaining, setHourRemaining] = useState(10);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [sessionId] = useState(() => {
     if (typeof window === "undefined") return "ssr-session";
     const k = "ae_session_id";
@@ -344,6 +346,7 @@ const asciiPortraits = portraits.filter((p) => p.svg_code && p.svg_code.trim().s
           <span>API {summary?.api_calls_today ?? 0}/450</span>
           {(summary?.synthesis_count ?? 0) > 0 && (<><span className="dot">·</span><span style={{ color: "#c084fc" }}>AUFH×{summary?.synthesis_count}</span></>)}
           {(summary?.consecutive_negative_cycles ?? 0) > 0 && (<><span className="dot">·</span><span style={{ color: "#ff4f6d" }}>NEG×{summary?.consecutive_negative_cycles}</span></>)}
+          <button className="sync" onClick={() => setAboutOpen(true)}>ABOUT</button>
           <button className="sync" onClick={fetchData}>SYNC {lastSync}</button>
         </div>
       </header>
@@ -579,6 +582,7 @@ const asciiPortraits = portraits.filter((p) => p.svg_code && p.svg_code.trim().s
       </div>
     )}
     <button className="chat-fab" onClick={() => setChatOpen((v) => !v)}>{chatOpen ? "✕" : "💬"}</button>
+    {aboutOpen && <AboutPage onClose={() => setAboutOpen(false)} />}
     </div></>
   );
 }
