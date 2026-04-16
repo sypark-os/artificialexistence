@@ -204,7 +204,8 @@ def cogito_ergo_sum(state, act_type, detail=""):
 
 
 class AEState:
-    def __init__(self, row):
+    def __init__(self, row, self_reflections=None):
+        self.self_reflections = self_reflections or []
         self.ai_id = row["ai_id"]
         self.self_image = float(row.get("current_self_image", 0.0))
         self.emotion = row.get("current_emotion", "neutral")
