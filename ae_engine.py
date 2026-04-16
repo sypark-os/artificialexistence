@@ -1343,9 +1343,15 @@ class AEEngine:
         print(f"  [GOALS] gap={gap['total']:.3f} | {subgoals[0][:60]}")
         if self._can_call_api():
             proposal = self.self_mod.propose_modification(gap, [thought_text[:100]]); self._track_api_call("self_mod")
-            if proposal.get("old_code"):
+            reason = proposal.get("reason", "")
+            old_code = proposal.get("old_code", "")
+            if old_code:
                 ok, msg = self.self_mod.apply_modification(proposal)
                 print(f"  [SELF_MOD] {'OK' if ok else 'SKIP'}: {msg[:80]}")
+            else:
+                print(f"  [SELF_MOD] NO_PROPOSAL: reason='{reason[:60]}'")
+        else:
+            print(f"  [SELF_MOD] BUDGET_SKIP: cycle_calls={_cycle_api_calls}/{API_CALLS_PER_CYCLE_MAX} energy={self.state.energy:.1f}")
 
         self._save_state()
         print(f"[CYCLE END] modules={modules_triggered}, calls={_cycle_api_calls}, cogito={_cogito_count}")
