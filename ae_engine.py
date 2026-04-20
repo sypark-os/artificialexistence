@@ -8,6 +8,9 @@ import hashlib
 import requests
 import ast
 import base64
+import sys
+import tempfile
+import subprocess
 import xml.etree.ElementTree as ast_ET
 from datetime import datetime, timezone, date
 
@@ -240,7 +243,7 @@ class SelfImageTracker:
         self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
         self.last_aufhebung = False
 
-    def update(self, sentiment, is_self_talk=True, energy_factor=0.5, timestamp=None, energy_ratio=None, reflection_delta=0.0, weight=1.01 + (1.0 - (energy_ratio or 1.0)), introspect=True):
+    def update(self, sentiment, is_self_talk=True, energy_factor=0.5, timestamp=None, energy_ratio=None, reflection_delta=0.0, weight=1.01, introspect=True):
         if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
 
         # Cogito: register sentiment processing
@@ -658,6 +661,16 @@ class SelfModificationEngine:
         except SyntaxError as e:
             return False, f"syntax error: {e}"
 
+        # Runtime validation: subprocess-based import test to catch definition-time
+        # errors (NameError, TypeError) that compile() does not detect.
+        # Introduced after cycle 195 (Phase 2 -> Phase 3) to prevent a class of bug
+        # where a parameter default value referenced a sibling parameter in the
+        # same signature, which is unresolvable at class-definition time.
+        runtime_error = self._validate_runtime(new_source)
+        if runtime_error:
+            self._log_mod(gap, proposal, False, False, f"BLOCKED: {runtime_error}")
+            return False, f"BLOCKED: {runtime_error}"
+
         # AST-level protection: verify all protected symbols are intact
         violation = self._ast_guard(source, new_source)
         if violation:
@@ -673,6 +686,47 @@ class SelfModificationEngine:
         else:
             self._log_mod(gap, proposal, True, False, msg)
             return False, msg
+
+    @staticmethod
+    def _validate_runtime(new_source):
+        """Execute candidate source in an isolated subprocess to detect errors
+        that surface only at class or module definition time (e.g. NameError
+        from a parameter default that references a sibling parameter).
+        Returns None if the candidate loads cleanly, otherwise an error string.
+        main() is not executed because of the __name__ == '__main__' guard,
+        so no network or DB calls occur during validation."""
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.py', delete=False, encoding='utf-8'
+            ) as tmp:
+                tmp.write(new_source)
+                tmp_path = tmp.name
+
+            code = (
+                "import importlib.util; "
+                f"spec = importlib.util.spec_from_file_location('_ae_candidate', {tmp_path!r}); "
+                "m = importlib.util.module_from_spec(spec); "
+                "spec.loader.exec_module(m)"
+            )
+            result = subprocess.run(
+                [sys.executable, '-c', code],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "unknown error").strip()
+                return f"runtime validation failed: {err[:300]}"
+            return None
+        except subprocess.TimeoutExpired:
+            return "runtime validation timeout (10s)"
+        except Exception as e:
+            return f"runtime validation error: {str(e)[:200]}"
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
     def create_github_pr(self, proposal, new_source):
         token = os.environ.get("GITHUB_TOKEN")
