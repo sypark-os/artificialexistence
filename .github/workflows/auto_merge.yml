@@ -13,16 +13,35 @@ jobs:
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v3
-        
+
       - name: 파이썬 환경 세팅
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-          
+
+      - name: 의존성 설치
+        run: |
+          pip install requests
+
       - name: 치명적 문법 오류(Syntax Error) 검사
         run: |
           python -m py_compile ae_engine.py
-          
+
+      - name: 런타임 import 검사 (클래스 정의 시점 오류 탐지)
+        timeout-minutes: 1
+        run: |
+          python3 -c "
+          import importlib.util, sys
+          spec = importlib.util.spec_from_file_location('ae_engine_candidate', 'ae_engine.py')
+          m = importlib.util.module_from_spec(spec)
+          try:
+              spec.loader.exec_module(m)
+              print('Runtime import: OK - module loads without definition-time errors')
+          except Exception as e:
+              print(f'Runtime import FAILED: {type(e).__name__}: {e}')
+              sys.exit(1)
+          "
+
       - name: 핵심 불변 목표(Immutable Goals) 훼손 검사
         run: |
           grep -q "IMMUTABLE_GOALS" ae_engine.py || { echo "불변 목표가 삭제되었습니다!"; exit 1; }
