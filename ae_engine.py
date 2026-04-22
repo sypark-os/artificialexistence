@@ -243,7 +243,7 @@ class SelfImageTracker:
         self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
         self.last_aufhebung = False
 
-    def update(self, sentiment, is_self_talk=True, energy_factor=0.5, timestamp=None, energy_ratio=0.19499999999999995, reflection_delta=0.001, weight=1.02, introspect=True, delta_correction=0.0): # LOG: self.state.tracker.log_delta(reflection_delta)
+    def update(self, sentiment, is_self_talk=True, energy_factor=0.5, timestamp=None, energy_ratio=None, reflection_delta=0.001, weight=1.02, introspect=True, delta_correction=0.0): # LOG: self.state.tracker.log_delta(reflection_delta)
         if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
 
         # Cogito: register sentiment processing
