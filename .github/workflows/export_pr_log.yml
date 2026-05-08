@@ -1,0 +1,64 @@
+name: Export PR Log
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch merged PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr list \
+            --repo sypark-os/artificialexistence \
+            --state merged \
+            --limit 500 \
+            --json number,title,author,createdAt,mergedAt,mergedBy,headRefName,baseRefName,body,labels,additions,deletions,changedFiles,url \
+            > pr_merged.json
+
+          gh pr list \
+            --repo sypark-os/artificialexistence \
+            --state all \
+            --limit 500 \
+            --json number,title,author,createdAt,mergedAt,closedAt,state,headRefName,labels,url \
+            > pr_all.json
+
+      - name: Convert to CSV
+        run: |
+          python3 - <<'PY'
+          import json, csv
+
+          for src, dst in [("pr_merged.json","pr_merged.csv"),("pr_all.json","pr_all.csv")]:
+              data = json.load(open(src))
+              if not data: 
+                  open(dst,"w").close(); continue
+              keys = sorted({k for row in data for k in row.keys()})
+              with open(dst,"w",newline="",encoding="utf-8") as f:
+                  w = csv.DictWriter(f, fieldnames=keys)
+                  w.writeheader()
+                  for row in data:
+                      flat = {}
+                      for k,v in row.items():
+                          if isinstance(v,(dict,list)):
+                              flat[k] = json.dumps(v, ensure_ascii=False)
+                          else:
+                              flat[k] = v
+                      w.writerow(flat)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr_log
+          path: |
+            pr_merged.csv
+            pr_all.csv
+            pr_merged.json
+            pr_all.json
