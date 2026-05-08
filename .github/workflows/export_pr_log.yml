@@ -1,4 +1,4 @@
-name: Export PR Log
+name: Export GitHub Activity Log
 
 on:
   workflow_dispatch:
@@ -12,66 +12,71 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Fetch merged PRs
+      - name: Fetch PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh pr list \
-            --repo sypark-os/artificialexistence \
+            --repo ${{ github.repository }} \
             --state merged \
-            --limit 500 \
+            --limit 1000 \
             --json number,title,author,createdAt,mergedAt,mergedBy,headRefName,baseRefName,body,labels,additions,deletions,changedFiles,url \
             > pr_merged.json
 
           gh pr list \
-            --repo sypark-os/artificialexistence \
+            --repo ${{ github.repository }} \
             --state all \
-            --limit 500 \
+            --limit 1000 \
             --json number,title,author,createdAt,mergedAt,closedAt,state,headRefName,labels,url \
             > pr_all.json
+
+      - name: Fetch commit log
+        run: |
+          git log --all --no-merges \
+            --pretty=format:'%H%x09%aI%x09%an%x09%ae%x09%s' \
+            > commits_raw.tsv
 
       - name: Convert to CSV
         run: |
           python3 - <<'PY'
           import json, csv
 
-          for src, dst in [("pr_merged.json","pr_merged.csv"),("pr_all.json","pr_all.csv")]:
+          for src, dst in [("pr_merged.json","pr_merged.csv"),
+                           ("pr_all.json","pr_all.csv")]:
               data = json.load(open(src))
-              if not data: 
-                  open(dst,"w").close(); continue
+              if not data:
+                  open(dst, "w").close()
+                  continue
               keys = sorted({k for row in data for k in row.keys()})
-              with open(dst,"w",newline="",encoding="utf-8") as f:
+              with open(dst, "w", newline="", encoding="utf-8") as f:
                   w = csv.DictWriter(f, fieldnames=keys)
                   w.writeheader()
                   for row in data:
                       flat = {}
-                      for k,v in row.items():
-                          if isinstance(v,(dict,list)):
-                              flat[k] = json.dumps(v, ensure_ascii=False)
-                          else:
-                              flat[k] = v
+                      for k, v in row.items():
+                          flat[k] = json.dumps(v, ensure_ascii=False) \
+                              if isinstance(v, (dict, list)) else v
                       w.writerow(flat)
+
+          with open("commits_raw.tsv", "r", encoding="utf-8") as fin, \
+               open("commits_all.csv", "w", newline="", encoding="utf-8") as fout:
+              w = csv.writer(fout)
+              w.writerow(["sha","author_date","author_name","author_email","subject"])
+              for line in fin:
+                  parts = line.rstrip("\n").split("\t", 4)
+                  if len(parts) == 5:
+                      w.writerow(parts)
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: pr_log
+          name: github_activity_log
           path: |
-
-      - name: Fetch full commit log
-        run: |
-          git -C ${{ github.workspace }} log \
-            --all --no-merges \
-            --pretty=format:'%H,%aI,%an,%s' \
-            > commits_all.csv
-          (echo "sha,author_date,author,subject"; cat commits_all.csv) > tmp && mv tmp commits_all.csv
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: commit_log
-          path: commits_all.csv
             pr_merged.csv
             pr_all.csv
             pr_merged.json
             pr_all.json
+            commits_all.csv
