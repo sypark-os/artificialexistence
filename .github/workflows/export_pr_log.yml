@@ -58,6 +58,19 @@ jobs:
         with:
           name: pr_log
           path: |
+
+      - name: Fetch full commit log
+        run: |
+          git -C ${{ github.workspace }} log \
+            --all --no-merges \
+            --pretty=format:'%H,%aI,%an,%s' \
+            > commits_all.csv
+          (echo "sha,author_date,author,subject"; cat commits_all.csv) > tmp && mv tmp commits_all.csv
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: commit_log
+          path: commits_all.csv
             pr_merged.csv
             pr_all.csv
             pr_merged.json
