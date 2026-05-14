@@ -243,7 +243,7 @@ class SelfImageTracker:
         self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
         self.last_aufhebung = False
 
-    def update(self, sentiment, is_self_talk=True, energy_factor=0.5, timestamp=None, energy_ratio=None): # LOG: self.state.tracker.log_delta(reflection_delta)
+    def update(self, sentiment, is_self_talk=True, energy_factor=0.5, timestamp=None, energy_ratio=None): # Adjusted: incorporates energy_ratio to normalize self-reflection delta against goal gap
         if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
 
         # Cogito: register sentiment processing
