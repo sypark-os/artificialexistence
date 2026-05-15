@@ -187,7 +187,7 @@ def analyze_sentiment(text):
 # ============================================================
 # [FEATURE 4] Cogito – Kantian Apperception
 # ============================================================
-def cogito_ergo_sum(state, act_type, detail="", tracker=None):
+def cogito_ergo_sum(state, act_type, detail="", tracker=None, force_internal=False):
     if state.energy < 1.0: print(f"CRITICAL: Energy exhaustion at {act_type}")
     """Self-referential registration function.
     Accompanies every cognitive act (sentiment analysis, emotion transition,
