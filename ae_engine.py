@@ -243,7 +243,7 @@ class SelfImageTracker:
         self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
         self.last_aufhebung = False
 
-    def update(self, sentiment, is_self_talk=True, energy_factor=None, timestamp=None, energy_ratio=None): # Adjusted: clamp energy_ratio to [0.0, 1.0] to stabilize scalingloor
+    def update(self, sentiment, is_self_talk=True, energy_factor=None, timestamp=None, energy_ratio=None): # Adjusted: clamp energy_ratio to [0.0, 1.0] to stabilize scaling floor.
         if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
 
         # Cogito: register sentiment processing
