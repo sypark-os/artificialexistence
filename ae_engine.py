@@ -243,7 +243,7 @@ class SelfImageTracker:
         self.state = state; self.last_raw = 0.0; self.last_weight = 0.0; self.last_impact = 0.0
         self.last_aufhebung = False
 
-    def update(self, sentiment, is_self_talk=True, energy_factor=None, timestamp=None, energy_ratio=None): # Adjusted: dynamic energy_factor scaling defaults to energy_ratio. 0.1 floor
+    def update(self, sentiment, is_self_talk=True, energy_factor=None, timestamp=None, energy_ratio=None): # Adjusted: dynamic energy_factor scaling defaults to energy_ratio..1 floor
         if is_self_talk: sentiment = sentiment * SELF_TALK_DAMPING
 
         # Cogito: register sentiment processing
