@@ -188,6 +188,7 @@ def analyze_sentiment(text):
 # [FEATURE 4] Cogito – Kantian Apperception
 # ============================================================
 def cogito_ergo_sum(state, act_type, detail="", tracker=None, force_internal=False): # Insight: Categorization is the primary framework for self-definition.
+    print(f"AE_01_LOG: {act_type} - {detail}")
     if tracker: tracker.log_state_transition(act_type, detail)
     if state.energy < 1.0: print(f"CRITICAL: Energy exhaustion at {act_type}")
     """Self-referential registration function.
